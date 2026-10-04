@@ -1,6 +1,11 @@
 // Coucou for Windows — app wiring and the commands the island calls.
 
 mod claude;
+mod api_chat;
+mod codex;
+mod codex_info;
+mod codex_usage;
+mod codex_hooks;
 mod files;
 mod hooks;
 mod integrations;
@@ -50,6 +55,7 @@ fn boot(app: AppHandle, shared: State<Shared>) -> BootInfo {
     let mut settings = shared.settings.lock().unwrap().clone();
     // The real state of ~/.claude/settings.json wins over whatever we stored.
     settings.hooks_installed = hooks::status().installed;
+    settings.codex_hooks_installed = codex_hooks::status().installed;
     let screen = island::screen_info(&app, &settings.screen);
     BootInfo {
         settings,
@@ -60,13 +66,22 @@ fn boot(app: AppHandle, shared: State<Shared>) -> BootInfo {
 }
 
 #[tauri::command]
-fn save_settings(app: AppHandle, shared: State<Shared>, settings: Settings) {
-    let (screen_changed, autostart_changed) = {
+fn save_settings(app: AppHandle, shared: State<Shared>, mut settings: Settings) {
+    let (screen_changed, autostart_changed, tray_changed) = {
         let mut current = shared.settings.lock().unwrap();
-        let screen_changed = current.screen != settings.screen;
+        // Ignore placement edits from stale settings controls while locked.
+        if current.position_locked && settings.position_locked {
+            settings.screen = current.screen.clone();
+            settings.free_placement = current.free_placement;
+            settings.position_x = current.position_x;
+            settings.position_y = current.position_y;
+        }
+        let screen_changed = current.screen != settings.screen || current.free_placement != settings.free_placement ||
+            current.position_x != settings.position_x || current.position_y != settings.position_y || current.compact_scale != settings.compact_scale || current.expanded_scale != settings.expanded_scale;
         let autostart_changed = current.autostart != settings.autostart;
+        let tray_changed = current.hide_tray_icon != settings.hide_tray_icon;
         *current = settings.clone();
-        (screen_changed, autostart_changed)
+        (screen_changed, autostart_changed, tray_changed)
     };
     if let Err(err) = settings::save(&settings) {
         eprintln!("[coucou] could not save settings: {err}");
@@ -80,7 +95,14 @@ fn save_settings(app: AppHandle, shared: State<Shared>, settings: Settings) {
     }
     if screen_changed {
         let collapsed = shared.gate.collapsed.load(Ordering::Relaxed);
-        island::apply_geometry(&app, &settings.screen, collapsed);
+        let height = *shared.gate.visible_height.lock().unwrap();
+        island::apply_geometry(&app, &settings, collapsed, Some(height));
+    }
+    if let Some(win) = island::window(&app) { let _ = win.set_always_on_top(settings.always_on_top); }
+    if tray_changed {
+        if let Err(err) = tray::set_hidden(&app, settings.hide_tray_icon) {
+            eprintln!("[coucou] tray visibility: {err}");
+        }
     }
     // Keep the other window in step (island ⇄ settings window).
     let _ = app.emit("settings-changed", settings);
@@ -89,10 +111,11 @@ fn save_settings(app: AppHandle, shared: State<Shared>, settings: Settings) {
 /// Hidden island → shrink the window to the invisible wake strip and park the
 /// cursor poll; anything else → full panel and 60 Hz polling.
 #[tauri::command]
-fn set_collapsed(app: AppHandle, shared: State<Shared>, collapsed: bool) {
-    let pref = shared.settings.lock().unwrap().screen.clone();
+fn set_collapsed(app: AppHandle, shared: State<Shared>, collapsed: bool, visible_height: Option<f64>) {
+    if let Some(height)=visible_height { *shared.gate.visible_height.lock().unwrap()=height; }
+    let pref = shared.settings.lock().unwrap().clone();
     shared.gate.collapsed.store(collapsed, Ordering::Relaxed);
-    island::apply_geometry(&app, &pref, collapsed);
+    island::apply_geometry(&app, &pref, collapsed, visible_height);
     // The wake strip must always take the mouse, and a resize invalidates the flag.
     island::set_ignore_cursor(&app, false);
     shared.gate.forget_ignore_state();
@@ -101,8 +124,10 @@ fn set_collapsed(app: AppHandle, shared: State<Shared>, collapsed: bool) {
 
 /// The front end pushes the island shape; Rust decides click-through from it.
 #[tauri::command]
-fn set_island_rect(shared: State<Shared>, x: f64, y: f64, width: f64, height: f64) {
-    shared.gate.set_rect(island::IslandRect { x, y, w: width, h: height });
+fn set_island_rect(app: AppHandle, shared: State<Shared>, x: f64, y: f64, width: f64, height: f64) {
+    let rect=island::IslandRect { x, y, w: width, h: height };
+    shared.gate.set_rect(rect);
+    let _=app; // No native window move on animation frames.
 }
 
 #[tauri::command]
@@ -116,9 +141,10 @@ fn focus_window(app: AppHandle, focused: bool) {
 
 #[tauri::command]
 fn reposition(app: AppHandle, shared: State<Shared>) {
-    let pref = shared.settings.lock().unwrap().screen.clone();
+    let pref = shared.settings.lock().unwrap().clone();
     let collapsed = shared.gate.collapsed.load(Ordering::Relaxed);
-    island::apply_geometry(&app, &pref, collapsed);
+    let height = *shared.gate.visible_height.lock().unwrap();
+    island::apply_geometry(&app, &pref, collapsed, Some(height));
 }
 
 #[tauri::command]
@@ -191,6 +217,59 @@ fn hooks_status() -> HookStatus {
     hooks::status()
 }
 
+#[tauri::command]
+fn open_project_folder(path: String) -> Result<(), String> {
+    let folder = std::path::Path::new(&path);
+    if !folder.is_absolute() || !folder.is_dir() { return Err("This project folder is unavailable.".into()); }
+    Command::new("explorer.exe").arg(folder).creation_flags(CREATE_NO_WINDOW)
+        .spawn().map_err(|_| "Couldn't open the project folder.".to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
+fn codex_hooks_status() -> HookStatus { codex_hooks::status() }
+
+#[tauri::command]
+fn codex_hooks_preview(install: bool) -> Result<HookPreview, String> { codex_hooks::preview(install) }
+
+#[tauri::command]
+fn codex_hooks_apply(app: AppHandle, shared: State<Shared>, install: bool, fingerprint: String) -> Result<String, String> {
+    let backup = codex_hooks::write(install, &fingerprint)?;
+    let updated = {
+        let mut current = shared.settings.lock().unwrap();
+        current.codex_hooks_installed = codex_hooks::status().installed;
+        let _ = settings::save(&current);
+        current.clone()
+    };
+    let _ = app.emit("settings-changed", updated);
+    Ok(backup)
+}
+
+/// Narrow setup CLI for scripted installations. It emits a reviewable JSON
+/// report and requires the fingerprint from the preview to apply a change.
+/// It never enables/trusts hooks on behalf of Codex.
+pub fn setup_cli() -> bool {
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    if args.first().map(String::as_str) != Some("--codex-hooks") { return false; }
+    let result: Result<serde_json::Value, String> = (|| {
+        match args.get(1).map(String::as_str) {
+            Some("status") => Ok(serde_json::to_value(codex_hooks::status()).unwrap()),
+            Some("preview-install") => Ok(serde_json::to_value(codex_hooks::preview(true)?).unwrap()),
+            Some("install") => {
+                if !settings::hook_exe_path().is_file() { return Err("Relay is missing".into()); }
+                let fingerprint = args.get(3).ok_or("Expected preview fingerprint")?;
+                Ok(serde_json::json!({"backup":codex_hooks::write(true, fingerprint)?, "status":codex_hooks::status()}))
+            }
+            _ => Err("Expected status, preview-install, or install".into()),
+        }
+    })();
+    let failed = result.is_err();
+    let report = match result { Ok(v) => v, Err(e) => serde_json::json!({"error":e}) };
+    let Some(output) = args.get(2) else { std::process::exit(2) };
+    if std::fs::write(output, serde_json::to_vec_pretty(&report).unwrap()).is_err() { std::process::exit(2); }
+    std::process::exit(if failed { 1 } else { 0 });
+}
+
 /// Returns the diff the user has to look at before anything is written.
 #[tauri::command]
 fn hooks_preview(install: bool) -> Result<HookPreview, String> {
@@ -245,22 +324,35 @@ fn approval_decline(app: AppHandle, request_id: String) {
 async fn chat_send(
     shared: State<'_, Shared>,
     chat: State<'_, Chat>,
+    api: State<'_, api_chat::ApiChat>,
     query: String,
     context: Option<ChatContext>,
 ) -> Result<ChatReply, String> {
-    let model = shared.settings.lock().unwrap().model.clone();
-    claude::send(&chat, &model, query, context).await
+    let prefs = shared.settings.lock().unwrap().clone();
+    match prefs.chat_provider.as_str(){
+        "anthropic" => claude::send(&chat, &prefs.model, query, context).await,
+        "openai" => api_chat::send(&api,"openai",&prefs.openai_model,query,context).await,
+        "openrouter" => api_chat::send(&api,"openrouter",&prefs.openrouter_model,query,context).await,
+        _ => Err("Select a chat provider in Settings.".into())
+    }
 }
 
 #[tauri::command]
-fn chat_reset(chat: State<Chat>) {
+async fn chat_reset(chat: State<'_, Chat>, api: State<'_, api_chat::ApiChat>) -> Result<(), String> {
     chat.reset();
+    api.reset().await;
+    Ok(())
 }
 
 /// Copies a dropped file into the inbox and reports its name back.
 #[tauri::command]
-fn ingest_file(path: String) -> Result<DroppedFile, String> {
-    files::ingest(&path)
+async fn ingest_file(path: String) -> Result<DroppedFile, String> {
+    tauri::async_runtime::spawn_blocking(move || files::ingest(&path)).await.map_err(|e|e.to_string())?
+}
+
+#[tauri::command]
+async fn ingest_upload(name: String, data: String) -> Result<DroppedFile,String> {
+    tauri::async_runtime::spawn_blocking(move || files::receive(&name,&data)).await.map_err(|e|e.to_string())?
 }
 
 /// The island may only ask whether a key exists — never read it.
@@ -330,13 +422,14 @@ fn create_settings_window(app: &AppHandle) {
         .additional_browser_args(BROWSER_ARGS)
         .title("Settings — Coucou")
         .inner_size(560.0, 680.0)
-        .min_inner_size(460.0, 480.0)
+        .min_inner_size(460.0, 600.0)
         .resizable(true)
         .visible(false)
         .center()
         .build()
     {
         Ok(win) => {
+            protect_settings_bounds(&win);
             // Closing it must only hide it, or it could never be reopened.
             let hidden = win.clone();
             win.on_window_event(move |event| {
@@ -355,14 +448,101 @@ pub fn show_settings_window(app: &AppHandle) {
         log::line("settings window missing");
         return;
     };
+    let prefs=app.state::<Shared>().settings.lock().unwrap().clone();
+    if let Some(parent)=island::window(app) {
+        if let (Ok(origin),Some(m))=(parent.outer_position(),island::target_monitor(app,&prefs.screen)) {
+            let shared=app.state::<Shared>();let r=*shared.gate.rect.lock().unwrap();
+            let dpi=parent.scale_factor().unwrap_or(1.0);let work=m.work_area();let target_dpi=m.scale_factor();
+            let parent_rect=(origin.x as f64+r.x*dpi,origin.y as f64+r.y*dpi,r.w*dpi,r.h*dpi);
+            let preferred_w=if prefs.settings_interface=="v1" {580.0}else{660.0};
+            let w=(preferred_w*target_dpi).min(work.size.width as f64-24.0*target_dpi).max(300.0);
+            let h=(760.0*target_dpi).min(work.size.height as f64-64.0*target_dpi).max(300.0);
+            if let (Ok(inner),Ok(outer),Ok(raw))=(win.inner_size(),win.outer_size(),win.hwnd()) {
+                let panel_w=w.round() as i32+(outer.width as i32-inner.width as i32).max(0);
+                let panel_h=h.round() as i32+(outer.height as i32-inner.height as i32).max(0);
+                let (x,y)=settings_position(parent_rect,(work.position.x as f64,work.position.y as f64,work.size.width as f64,work.size.height as f64),(panel_w as f64,panel_h as f64),12.0*target_dpi);
+                *SETTINGS_BOUNDS.lock().unwrap()=Some(SettingsBounds{x,y,w:panel_w,h:panel_h,min_w:(460.0*target_dpi) as i32+(panel_w-w as i32),min_h:((600.0*target_dpi) as i32+(panel_h-h as i32)).min(panel_h)});
+                let _=win.unminimize();let _=win.show();
+                let handle=raw.0 as isize;let popup=win.clone();
+                // Size and position the HWND atomically, instead of queued size/move
+                // requests that can reuse the hidden window's stale short bounds.
+                let _=win.run_on_main_thread(move || {
+                    use windows::Win32::UI::WindowsAndMessaging::{SetWindowPos,SWP_NOZORDER,SWP_NOACTIVATE};
+                    let hwnd=windows::Win32::Foundation::HWND(handle as *mut _);
+                    let result=unsafe{SetWindowPos(hwnd,None,x,y,panel_w,panel_h,SWP_NOZORDER|SWP_NOACTIVATE)};
+                    if let Err(e)=result{log::line(format!("settings popup bounds failed: {e}"));}
+                    let _=popup.set_focus();
+                });
+                return;
+            }
+        }
+    }
     let _ = win.unminimize();
     let _ = win.show();
     let _ = win.set_focus();
 }
 
+static SETTINGS_ORIGINAL_PROC: std::sync::atomic::AtomicIsize = std::sync::atomic::AtomicIsize::new(0);
+#[derive(Clone,Copy)]
+struct SettingsBounds{x:i32,y:i32,w:i32,h:i32,min_w:i32,min_h:i32}
+static SETTINGS_BOUNDS:Mutex<Option<SettingsBounds>>=Mutex::new(None);
+
+fn protect_settings_bounds(win:&tauri::WebviewWindow) {
+    use windows::Win32::UI::WindowsAndMessaging::{GetWindowLongPtrW,SetWindowLongPtrW,GWLP_WNDPROC};
+    let Ok(raw)=win.hwnd() else{return};
+    let hwnd=windows::Win32::Foundation::HWND(raw.0 as *mut _);
+    // Keep the existing Tauri/WebView2 procedure in the chain.
+    let old=unsafe{GetWindowLongPtrW(hwnd,GWLP_WNDPROC)};
+    if old==0{return;}
+    SETTINGS_ORIGINAL_PROC.store(old,Ordering::Relaxed);
+    unsafe{SetWindowLongPtrW(hwnd,GWLP_WNDPROC,settings_bounds_proc as *const () as isize);}
+}
+unsafe extern "system" fn settings_bounds_proc(hwnd:windows::Win32::Foundation::HWND,msg:u32,w:windows::Win32::Foundation::WPARAM,l:windows::Win32::Foundation::LPARAM)->windows::Win32::Foundation::LRESULT {
+    use windows::Win32::UI::WindowsAndMessaging::{CallWindowProcW,WM_WINDOWPOSCHANGING,WINDOWPOS,WNDPROC,SWP_NOSIZE,SWP_NOMOVE};
+    if msg==WM_WINDOWPOSCHANGING {
+        let p=unsafe{&mut *(l.0 as *mut WINDOWPOS)};
+        if !p.flags.contains(SWP_NOSIZE)&&p.cx>0&&p.cy>0&&p.x>-30000&&p.y>-30000 {
+            if let Some(b)=*SETTINGS_BOUNDS.lock().unwrap() {
+                // Programmatic SetWindowPos calls can bypass Windows' normal
+                // minimum-size checks. Discard stale, undersized popup bounds.
+                if p.cx<b.min_w||p.cy<b.min_h {
+                    p.x=b.x;p.y=b.y;p.cx=b.w;p.cy=b.h;p.flags&=!(SWP_NOSIZE|SWP_NOMOVE);
+                }
+            }
+        }
+    }
+    let old:WNDPROC=unsafe{std::mem::transmute(SETTINGS_ORIGINAL_PROC.load(Ordering::Relaxed))};
+    unsafe{CallWindowProcW(old,hwnd,msg,w,l)}
+}
+
 #[tauri::command]
 fn open_settings_window(app: AppHandle) {
     show_settings_window(&app);
+}
+
+fn settings_position(parent:(f64,f64,f64,f64),work:(f64,f64,f64,f64),panel:(f64,f64),gap:f64)->(i32,i32){
+    let(x,y,w,h)=parent;let(mx,my,mw,mh)=work;let(pw,ph)=panel;
+    let max_x=(mx+mw-pw-gap).max(mx+gap);let max_y=(my+mh-ph-gap).max(my+gap);
+    let fits=|(cx,cy):(f64,f64)|cx>=mx+gap&&cy>=my+gap&&cx+pw<=mx+mw-gap&&cy+ph<=my+mh-gap;
+    // Prefer below, aligned with the island's right edge, then the available sides.
+    let candidates=[((x+w-pw).clamp(mx+gap,max_x),y+h+gap),(x+w+gap,y.clamp(my+gap,max_y)),
+        (x-pw-gap,y.clamp(my+gap,max_y)),((x+w-pw).clamp(mx+gap,max_x),y-ph-gap)];
+    let chosen=candidates.iter().copied().find(|&c|fits(c)).unwrap_or((x.clamp(mx+gap,max_x),(y+h+gap).clamp(my+gap,max_y)));
+    (chosen.0.round() as i32,chosen.1.round() as i32)
+}
+
+#[cfg(test)]
+mod settings_position_tests{
+    use super::*;
+    #[test]
+    fn popup_uses_available_sides_and_stays_in_work_area(){
+        assert_eq!(settings_position((10.0,900.0,640.0,160.0),(0.0,0.0,2560.0,1400.0),(560.0,700.0),12.0),(662,688));
+        assert_eq!(settings_position((1900.0,900.0,640.0,160.0),(0.0,0.0,2560.0,1400.0),(560.0,700.0),12.0),(1328,688));
+        assert_eq!(settings_position((10.0,100.0,640.0,160.0),(0.0,0.0,2560.0,1400.0),(560.0,700.0),12.0),(90,272));
+        assert_eq!(settings_position((1900.0,100.0,640.0,160.0),(0.0,0.0,2560.0,1400.0),(560.0,700.0),12.0),(1980,272));
+        assert_eq!(settings_position((-1000.0,-300.0,736.0,184.0),(-1080.0,-313.0,1080.0,1880.0),(560.0,700.0),12.0),(-824,-104));
+        assert_eq!(settings_position((-1000.0,1350.0,736.0,184.0),(-1080.0,-313.0,1080.0,1880.0),(560.0,700.0),12.0),(-824,638));
+    }
 }
 
 pub fn run() {
@@ -380,17 +560,31 @@ pub fn run() {
         })
         .manage(Pending::default())
         .manage(Chat::default())
+        .manage(api_chat::ApiChat::default())
+        .manage(codex_info::InfoCache::default())
+        .manage(codex_info::LiveCache::default())
+        .manage(codex_usage::UsageCache::default())
         .invoke_handler(tauri::generate_handler![
             boot,
             save_settings,
+            island::drag_island,
             set_collapsed,
             set_island_rect,
             focus_window,
             reposition,
+            island::monitor_choices,
             open_url,
             open_in_vscode,
+            open_project_folder,
+            codex::open_codex_chat,
+            codex_info::codex_info,
+            codex_info::codex_live_limits,
+            codex_usage::codex_telemetry,
             quit_app,
             hooks_status,
+            codex_hooks_status,
+            codex_hooks_preview,
+            codex_hooks_apply,
             hooks_preview,
             hooks_apply,
             approval_decision,
@@ -400,6 +594,7 @@ pub fn run() {
             chat_send,
             chat_reset,
             ingest_file,
+            ingest_upload,
             secret_present,
             secret_set,
             secret_clear,
@@ -410,13 +605,14 @@ pub fn run() {
         ])
         .setup(move |app| {
             let handle = app.handle().clone();
-            tray::build(&handle)?;
+            tray::set_hidden(&handle, loaded.hide_tray_icon)?;
             // Before the island: see create_settings_window.
             create_settings_window(&handle);
 
             if let Some(win) = island::window(&handle) {
                 island::make_non_activating(&win);
-                island::apply_geometry(&handle, &loaded.screen, false);
+                island::protect_geometry(&win,gate.clone());
+                island::apply_geometry(&handle, &loaded, false, None);
                 let _ = win.show();
             }
             gate.collapsed.store(false, Ordering::Relaxed);

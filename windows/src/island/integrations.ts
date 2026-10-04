@@ -37,6 +37,9 @@ export async function refreshConfigured() {
     data: {}, error: null, loaded: false, configured: false,
   };
   State.integrations.integration_claude = { ...claude, configured: hooks };
+  State.integrations.integration_codex = {
+    data: {}, error: null, loaded: false, configured: State.settings.codexHooksInstalled,
+  };
   State.notify();
 }
 

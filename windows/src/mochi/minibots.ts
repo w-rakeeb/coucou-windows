@@ -2,7 +2,8 @@
 // Each canvas owns a BotEngine; the island's frame loop ticks every live one.
 
 import { BotEngine, hexToRGB } from "./engine";
-import type { AgentTask } from "../core/state";
+import { State, type AgentTask } from "../core/state";
+import { canvasDensity, resizeCanvas } from "../core/render-scale";
 
 interface MiniBot {
   canvas: HTMLCanvasElement;
@@ -30,11 +31,7 @@ export function createMiniBot(task: AgentTask, bodySize: number): HTMLElement {
 
   const canvas = document.createElement("canvas");
   const engineSize = bodySize / 0.6;
-  const dpr = Math.min(2, window.devicePixelRatio || 1);
-  canvas.width = Math.round(engineSize * dpr);
-  canvas.height = Math.round(engineSize * dpr);
-  canvas.style.width = `${engineSize}px`;
-  canvas.style.height = `${engineSize}px`;
+  resizeCanvas(canvas, engineSize, engineSize);
   slot.append(canvas);
 
   const engine = new BotEngine();
@@ -73,8 +70,11 @@ export function syncMiniBotStates(tasks: AgentTask[]) {
 }
 
 export function tickMiniBots(dt: number) {
-  const dpr = Math.min(2, window.devicePixelRatio || 1);
+  const dpr = canvasDensity();
   for (const mb of live.values()) {
+    const compact=!!mb.canvas.closest("#mini-grid"),view=mb.canvas.closest(".view");
+    if(State.mode==="hidden" || (compact ? State.mode!=="compact" : State.mode!=="expanded" || (view && !view.classList.contains("on"))))continue;
+    resizeCanvas(mb.canvas, mb.cssSize, mb.cssSize, dpr);
     const ctx = mb.canvas.getContext("2d");
     if (!ctx) continue;
     mb.engine.update(dt);

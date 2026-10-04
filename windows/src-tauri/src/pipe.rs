@@ -124,9 +124,11 @@ async fn handle(app: AppHandle, mut pipe: NamedPipeServer) {
         .and_then(Value::as_str)
         .unwrap_or_default()
         .to_string();
+    let provider = payload.get("provider").and_then(Value::as_str).unwrap_or("claude").to_string();
+    let session = payload.get("session_id").and_then(Value::as_str).unwrap_or("").to_string();
 
     if event != "PermissionRequest" {
-        log::line(format!("hook {event}"));
+        log::line(format!("hook {provider} {event} session={session}"));
         let _ = app.emit_to(WINDOW_LABEL, "hook", payload);
         let _ = pipe.disconnect();
         return;
@@ -139,11 +141,12 @@ async fn handle(app: AppHandle, mut pipe: NamedPipeServer) {
         pending.0.lock().unwrap().insert(id.clone(), tx);
     }
     payload["request_id"] = json!(id);
-    log::line(format!("hook PermissionRequest id={id}"));
+    log::line(format!("hook {provider} PermissionRequest id={id} session={session}"));
     let _ = app.emit_to(WINDOW_LABEL, "hook", payload);
 
     let decision = wait_for_decision(&id, &mut rx).await;
     app.state::<Pending>().0.lock().unwrap().remove(&id);
+    let _ = app.emit_to(WINDOW_LABEL, "approval-ended", json!({"requestId":id}));
 
     // No decision: say nothing at all. coucou-hook then writes nothing to stdout
     // and Claude Code asks in the terminal, exactly as if Coucou were closed.

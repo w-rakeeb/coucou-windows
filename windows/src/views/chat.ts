@@ -63,6 +63,9 @@ export function buildPrompt(onHeightChange: () => void): ViewHost {
     if (!query || sending) return;
     input.value = "";
     sending = true;
+    const provider = State.settings.chatProvider;
+    const model = provider === "anthropic" ? State.settings.model : provider === "openai" ? State.settings.openaiModel : State.settings.openrouterModel;
+    const sameProvider = () => provider === State.settings.chatProvider && model === (provider === "anthropic" ? State.settings.model : provider === "openai" ? State.settings.openaiModel : State.settings.openrouterModel);
     Sound.play("send");
 
     State.chatHistory.push({ id: nextId++, role: "user", content: query });
@@ -76,10 +79,12 @@ export function buildPrompt(onHeightChange: () => void): ViewHost {
 
     try {
       const reply = await Bridge.chatSend(query, context);
+      if (!sameProvider()) return;
       State.chatHistory.push({ id: nextId++, role: "assistant", content: reply.text });
       State.stateOverride = null;
       Sound.play("finish");
     } catch (err) {
+      if (!sameProvider()) return;
       State.stateOverride = null;
       State.noteMessage = String(err).replace(/^Error:\s*/, "");
       State.view = "note";
@@ -122,7 +127,8 @@ export function buildPrompt(onHeightChange: () => void): ViewHost {
         log.scrollTop = log.scrollHeight;
       }
 
-      input.placeholder = State.chatHistory.length === 0 ? "Ask me anything…" : "Continue…";
+      const provider = State.settings.chatProvider === "anthropic" ? "Claude" : State.settings.chatProvider === "openai" ? "OpenAI" : "OpenRouter";
+      input.placeholder = State.chatHistory.length === 0 ? `Ask ${provider}…` : "Continue…";
       input.disabled = sending;
     },
     focus() {

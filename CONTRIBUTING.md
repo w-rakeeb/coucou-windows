@@ -4,6 +4,20 @@ Thanks for wanting to help Mochi grow up! 🫶
 
 ## Getting started
 
+For this fork's Windows changes, use the `windows-enhancements` branch and work in `windows/`:
+
+```powershell
+npm ci
+npm run build
+npm run test:codex
+cargo test --workspace --lib --bins
+npm run tauri -- build --no-bundle
+```
+
+Keep provider sessions and approval owners separate, preserve existing hooks, and store API keys in Windows Credential Manager. Include behavior checks for session routing, token totals, or native placement changes. Source-only contributions retain the original credits and [asset license](LICENSE-ASSETS.md).
+
+The original macOS workflow is below.
+
 ```bash
 brew install xcodegen
 cd NotchBuddy && xcodegen && open NotchBuddy.xcodeproj
@@ -17,7 +31,7 @@ Never edit `NotchBuddy.xcodeproj` by hand: change `project.yml` and run `xcodege
 - A new emote or sound for Mochi.
 - Bug fixes — please describe how to reproduce.
 
-## Rules of the house
+## macOS guidelines
 
 - Swift 6, SwiftUI + AppKit, **no third-party dependencies** unless there's really no other way.
 - Secrets go in the Keychain, never on disk or in git.

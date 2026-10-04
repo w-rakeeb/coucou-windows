@@ -119,6 +119,12 @@ fn read_event() -> Option<(String, String)> {
     if std::io::stdin().read_to_end(&mut raw).is_err() || raw.is_empty() {
         return None;
     }
+    prepare_event(raw, &std::env::args().skip(1).collect::<Vec<_>>())
+}
+
+fn prepare_event(mut raw: Vec<u8>, args: &[String]) -> Option<(String, String)> {
+    // Do not forward unbounded input or truncate an approval's command.
+    if raw.len() > 1 << 20 { return None; }
     // Some shells hand us a UTF-8 BOM; serde_json would choke on it.
     if raw.starts_with(&[0xEF, 0xBB, 0xBF]) {
         raw.drain(..3);
@@ -129,7 +135,10 @@ fn read_event() -> Option<(String, String)> {
 
     // The event name is passed as argv[1] by the hook command; the JSON usually
     // carries it too. Trust argv when the JSON is missing it.
-    let arg_event = std::env::args().nth(1).unwrap_or_default();
+    let codex = args.first().map(String::as_str) == Some("--codex");
+    let arg_event = args.get(usize::from(codex)).cloned().unwrap_or_default();
+    // Provider identity comes from our installed command, never from stdin.
+    map.insert("provider".into(), serde_json::json!(if codex { "codex" } else { "claude" }));
     let event = map
         .get("hook_event_name")
         .and_then(|v| v.as_str())
@@ -137,6 +146,12 @@ fn read_event() -> Option<(String, String)> {
         .filter(|s| !s.is_empty())
         .unwrap_or(arg_event);
     map.insert("hook_event_name".into(), serde_json::Value::String(event.clone()));
+
+    if codex {
+        if let Some(message) = map.get("last_assistant_message").cloned() {
+            map.insert("message".into(), message);
+        }
+    }
 
     for field in DROPPED_FIELDS {
         map.remove(*field);
@@ -171,7 +186,7 @@ fn read_event() -> Option<(String, String)> {
         }
     }
 
-    truncate_strings(&mut payload);
+    if event != "PermissionRequest" { truncate_strings(&mut payload); }
 
     let mut line = payload.to_string();
     line.push('\n');
@@ -262,5 +277,23 @@ mod tests {
         let s = v["tool_input"]["content"].as_str().unwrap();
         assert!(s.len() <= MAX_FIELD_LEN + 4);
         assert!(s.ends_with('…'));
+    }
+
+    #[test]
+    fn codex_events_keep_identity_and_normalize_the_final_message() {
+        let raw = br#"{"hook_event_name":"Stop","provider":"forged","session_id":"codex-1","turn_id":"turn-2","last_assistant_message":"Done","transcript_path":"private"}"#.to_vec();
+        let (line, event) = prepare_event(raw, &["--codex".into(), "Stop".into()]).unwrap();
+        let v: serde_json::Value = serde_json::from_str(&line).unwrap();
+        assert_eq!(event, "Stop"); assert_eq!(v["provider"], "codex");
+        assert_eq!(v["message"], "Done"); assert_eq!(v["turn_id"], "turn-2");
+        assert!(v.get("transcript_path").is_none());
+    }
+
+    #[test]
+    fn approval_input_is_never_silently_truncated() {
+        let input = serde_json::json!({"hook_event_name":"PermissionRequest", "tool_input":{"command":"x".repeat(6000)}});
+        let (line, _) = prepare_event(input.to_string().into_bytes(), &["--codex".into()]).unwrap();
+        let v: serde_json::Value = serde_json::from_str(&line).unwrap();
+        assert_eq!(v["tool_input"]["command"].as_str().unwrap().len(), 6000);
     }
 }

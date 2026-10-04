@@ -18,3 +18,11 @@ DerivedData/
 # Local only (never published)
 .claude/
 _prive/
+
+# Private development data and separate publication checkouts
+.local/
+.codex/
+GitHub/
+.env
+.env.*
+!.env.example

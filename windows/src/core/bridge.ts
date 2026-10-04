@@ -4,8 +4,8 @@
 
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import { getCurrentWebview } from "@tauri-apps/api/webview";
-import type { Settings } from "./state";
+import { getCurrentWindow } from "@tauri-apps/api/window";
+import type { Settings, CodexInfo, CodexTelemetry, CodexLimitWindow } from "./state";
 
 export const IS_TAURI =
   typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
@@ -34,7 +34,9 @@ export const Bridge = {
   saveSettings: (settings: Settings) => call<void>("save_settings", { settings }),
 
   /** Shrink the window down to the invisible wake strip (hidden) or back to full. */
-  setCollapsed: (collapsed: boolean) => call<void>("set_collapsed", { collapsed }),
+  setCollapsed: (collapsed: boolean, visibleHeight?: number) => call<void>("set_collapsed", { collapsed, visibleHeight }),
+  dragIsland: () => call<void>("drag_island"),
+  monitorChoices: () => call<{id:string;label:string;width:number;height:number}[]>("monitor_choices"),
 
   /**
    * Pushes the island shape in window coordinates. Rust flips click-through from
@@ -52,6 +54,14 @@ export const Bridge = {
 
   /** "Open terminal" → opens the folder in VS Code when `code` is on PATH. */
   openInVSCode: (path: string | null) => call<boolean>("open_in_vscode", { path }),
+  openProjectFolder: (path: string) => call<void>("open_project_folder", { path }),
+
+  /** Open the corresponding local desktop chat without sending a message. */
+  openCodexChat: (threadId: string | null) => call<void>("open_codex_chat", { threadId }),
+  codexInfo: (threadId: string | null, force = false) => call<CodexInfo>("codex_info", { threadId, force }),
+  codexLiveLimits: (threadIds: string[]) => call<CodexInfo>("codex_live_limits", { threadIds }),
+  codexTelemetry: (threadIds: string[], primary: CodexLimitWindow | null, secondary: CodexLimitWindow | null) =>
+    call<CodexTelemetry>("codex_telemetry", { threadIds, primary, secondary }),
 
   quit: () => call<void>("quit_app"),
 
@@ -62,6 +72,10 @@ export const Bridge = {
 
   // ── Claude Code hooks ─────────────────────────────────────────────────────
   hooksStatus: () => call<HookStatus>("hooks_status"),
+  codexHooksStatus: () => call<HookStatus>("codex_hooks_status"),
+  codexHooksPreview: (install: boolean) => callOrThrow<HookPreview>("codex_hooks_preview", { install }),
+  codexHooksApply: (install: boolean, fingerprint: string) =>
+    callOrThrow<string>("codex_hooks_apply", { install, fingerprint }),
   /** Diff to show before anything is written. `install: false` previews removal. */
   hooksPreview: (install: boolean) => callOrThrow<HookPreview>("hooks_preview", { install }),
   /**
@@ -85,6 +99,7 @@ export const Bridge = {
   chatReset: () => call<void>("chat_reset"),
   /** Copies a dropped file into the inbox. */
   ingestFile: (path: string) => callOrThrow<DroppedFile>("ingest_file", { path }),
+  ingestUpload: (name: string, data: string) => callOrThrow<DroppedFile>("ingest_upload", { name, data }),
   /** Only ever tells you whether a key exists — never its value. */
   secretPresent: (key: string) => call<boolean>("secret_present", { key }),
   secretSet: (key: string, value: string) => callOrThrow<void>("secret_set", { key, value }),
@@ -151,7 +166,7 @@ export interface DragDropPayload {
 /** Files dragged onto the island. Only reaches us when the window takes the mouse. */
 export async function onDragDrop(handler: (e: DragDropPayload) => void) {
   if (!IS_TAURI) return () => {};
-  return getCurrentWebview().onDragDropEvent((event) => {
+  return getCurrentWindow().onDragDropEvent((event) => {
     handler(event.payload as DragDropPayload);
   });
 }

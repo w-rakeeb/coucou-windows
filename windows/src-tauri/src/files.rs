@@ -6,6 +6,9 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime};
 
 use serde::Serialize;
+use base64::{Engine,engine::general_purpose::STANDARD};
+use std::io::{Read,Write};
+const MAX_BYTES:u64=25*1024*1024;
 
 use crate::settings;
 
@@ -30,41 +33,50 @@ pub fn ingest(source: &str) -> Result<DroppedFile, String> {
         return Err("Folders can't be dropped yet.".into());
     }
 
-    let dir = inbox_dir();
-    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    if meta.len()>MAX_BYTES{return Err("Choose a file smaller than 25 MB.".into());}
+    let name=src.file_name().map(|n|n.to_string_lossy().to_string()).ok_or("Invalid file name")?;
+    let mut input=std::fs::File::open(src).map_err(|e|e.to_string())?;
+    let mut sample=vec![0;4096];let count=input.read(&mut sample).map_err(|e|e.to_string())?;
+    validate(&name,&sample[..count])?;
+    let (dest,mut output)=reserve(&name)?;
+    let copy=std::fs::File::open(src).and_then(|mut file|std::io::copy(&mut file,&mut output));
+    if let Err(e)=copy{drop(output);let _=std::fs::remove_file(&dest);return Err(format!("Cannot copy file: {e}"));}
+    let _=output.set_modified(SystemTime::now());
+    drop(output);sweep(&inbox_dir());
+    Ok(DroppedFile{name,path:dest.to_string_lossy().to_string(),size:meta.len()})
+}
 
-    let name = src
-        .file_name()
-        .map(|n| n.to_string_lossy().to_string())
-        .unwrap_or_else(|| "file".into());
+/// Selected files arrive after the user chooses them in the Windows file picker.
+pub fn receive(name:&str,data:&str)->Result<DroppedFile,String>{
+    if data.len()>((MAX_BYTES as usize+2)/3)*4{return Err("Choose a file smaller than 25 MB.".into());}
+    if name.is_empty()||Path::new(name).components().count()!=1||name=="."||name==".."{return Err("Invalid file name".into());}
+    let bytes=STANDARD.decode(data).map_err(|_|"Could not read the selected file.")?;
+    if bytes.len() as u64>MAX_BYTES{return Err("Choose a file smaller than 25 MB.".into());}
+    validate(name,&bytes[..bytes.len().min(4096)])?;
+    let (dest,mut output)=reserve(name)?;
+    if let Err(e)=output.write_all(&bytes){drop(output);let _=std::fs::remove_file(&dest);return Err(e.to_string());}
+    drop(output);sweep(&inbox_dir());
+    Ok(DroppedFile{name:name.into(),path:dest.to_string_lossy().to_string(),size:bytes.len() as u64})
+}
 
-    let mut dest = dir.join(&name);
-    if dest.exists() {
-        let stem = src.file_stem().map(|s| s.to_string_lossy().to_string()).unwrap_or_default();
-        let ext = src.extension().map(|s| format!(".{}", s.to_string_lossy())).unwrap_or_default();
-        for i in 2..1000 {
-            let candidate = dir.join(format!("{stem} ({i}){ext}"));
-            if !candidate.exists() {
-                dest = candidate;
-                break;
-            }
+fn validate(name:&str,sample:&[u8])->Result<(),String>{
+    let extension=Path::new(name).extension().and_then(|s|s.to_str()).unwrap_or("").to_lowercase();
+    if ["pdf","png","jpg","jpeg","webp","gif"].contains(&extension.as_str()){return Ok(());}
+    let text=std::str::from_utf8(sample).map(|_|true).unwrap_or_else(|e|e.error_len().is_none());
+    if text&&!sample.contains(&0){Ok(())}else{Err("Choose a PDF, image, plain text or code file. Word documents must be exported as PDF first.".into())}
+}
+
+fn reserve(name:&str)->Result<(PathBuf,std::fs::File),String>{
+    let dir=inbox_dir();std::fs::create_dir_all(&dir).map_err(|e|e.to_string())?;
+    let source=Path::new(name);let stem=source.file_stem().and_then(|s|s.to_str()).unwrap_or("file");
+    let extension=source.extension().map(|s|format!(".{}",s.to_string_lossy())).unwrap_or_default();
+    for i in 1..10000{
+        let dest=dir.join(if i==1{name.to_string()}else{format!("{stem} ({i}){extension}")});
+        match std::fs::OpenOptions::new().create_new(true).write(true).open(&dest){
+            Ok(file)=>return Ok((dest,file)),Err(e)if e.kind()==std::io::ErrorKind::AlreadyExists=>continue,Err(e)=>return Err(e.to_string())
         }
     }
-
-    std::fs::copy(src, &dest).map_err(|e| format!("cannot copy: {e}"))?;
-    // CopyFileEx carries the source's timestamps across, so a file last edited
-    // three years ago would arrive already older than the sweep window and be
-    // deleted on the spot. The inbox ages from when *we* copied it.
-    if let Ok(file) = std::fs::File::options().write(true).open(&dest) {
-        let _ = file.set_modified(SystemTime::now());
-    }
-    sweep(&dir);
-
-    Ok(DroppedFile {
-        name,
-        path: dest.to_string_lossy().to_string(),
-        size: meta.len(),
-    })
+    Err("Too many files with this name in the inbox.".into())
 }
 
 /// Drops anything copied here more than a week ago. `ingest` stamps every copy
@@ -85,6 +97,17 @@ fn sweep(dir: &Path) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn selected_upload_is_safe_and_keeps_bytes(){
+        let name=format!("coucou-selected-{}.txt",std::process::id());
+        let first=receive(&name,&STANDARD.encode("Selected ✓".as_bytes())).unwrap();
+        let second=receive(&name,&STANDARD.encode(b"second")).unwrap();
+        assert_ne!(first.path,second.path);assert_eq!(std::fs::read(&first.path).unwrap(),"Selected ✓".as_bytes());
+        assert!(receive("../escape.txt","AA==").is_err());assert!(receive("bad.txt","not base64").is_err());
+        assert!(receive("archive.docx",&STANDARD.encode([0x50,0x4b,0,0xff])).is_err());
+        let _=std::fs::remove_file(&first.path);let _=std::fs::remove_file(&second.path);
+    }
 
     #[test]
     fn ingest_copies_and_never_overwrites() {

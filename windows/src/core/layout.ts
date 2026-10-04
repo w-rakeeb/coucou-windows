@@ -6,6 +6,8 @@ export type IslandMode = "hidden" | "compact" | "expanded";
 
 export type IslandViewName =
   | "overview"
+  | "activity"
+  | "usage"
   | "empty"
   | "approval"
   | "question"
@@ -56,7 +58,7 @@ export const PANEL_H = 320;
 // No notch on a PC: these are the hidden/compact sizes from docs/SPEC.md.
 export const NOTCH_W = 184;
 export const NOTCH_H = 32;
-export const COMPACT_W = 288; // NOTCH_W + 104
+export const COMPACT_W = 288;
 export const EXPANDED_W = 640;
 
 export const ROUNDED_CORNER = 14; // hidden / compact
@@ -68,6 +70,8 @@ export const WAKE_STRIP_H = 6;
 
 export const VIEW_LAYOUTS: Record<IslandViewName, ViewLayout> = {
   overview: { height: 160, botX: 68, botY: null, botDiameter: 58, agentMode: "pills" },
+  activity: { height: 300, botX: 62, botY: 82, botDiameter: 56, agentMode: "column" },
+  usage: { height: 270, botX: 62, botY: 110, botDiameter: 56, agentMode: "none" },
   empty: { height: 160, botX: 70, botY: null, botDiameter: 62, agentMode: "none" },
   approval: { height: 160, botX: 62, botY: null, botDiameter: 56, agentMode: "column" },
   question: { height: 160, botX: 62, botY: null, botDiameter: 56, agentMode: "column" },

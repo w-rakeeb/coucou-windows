@@ -6,7 +6,7 @@
 
 import { h, svg, clear, dot } from "./dom";
 import { ICONS } from "./icons";
-import { State, type AgentTask } from "../core/state";
+import { State, isCodingAgent, providerName, type AgentTask } from "../core/state";
 import { Bridge } from "../core/bridge";
 
 /** Same shape as the Swift `timeAgo` computed properties. */
@@ -55,22 +55,28 @@ const OPEN_URLS: Record<string, string> = {
 
 function idleCard(task: AgentTask, openSettings: () => void): HTMLElement {
   const info = State.integrations[task.id];
-  const configured = info?.configured ?? false;
+  const configured = isCodingAgent(task)
+    ? task.source === "codex" ? State.settings.codexHooksInstalled : State.settings.hooksInstalled
+    : info?.configured ?? false;
   const error = info?.error ?? null;
   // The Claude Code pill is about hooks, not a key — the macOS wording would be
   // misleading here.
-  const missing = task.id === "integration_claude" ? "Hooks not installed" : "Key not configured";
-  const label = error ?? (configured ? "Connected · loading…" : missing);
+  const missing = isCodingAgent(task) ? "Hooks not installed" : "Key not configured";
+  const label = error ?? (configured ? isCodingAgent(task) ? "Waiting for session activity" : "Connected · loading…" : missing);
   const statusColor = error || !configured ? "#F4505E" : "#22C55E";
 
   const actions = h("div", { class: "int-actions" });
-  if (task.id === "integration_claude") {
+  if (isCodingAgent(task)) {
     actions.append(
       h("button", {
         class: "link-btn",
         style: `color:${task.color}b3`,
-        text: "Open Visual Studio Code",
-        onclick: () => void Bridge.openInVSCode(task.sessionCwd ?? null),
+        text: task.sessionCwd ? "Open folder" : task.source === "codex" ? "Open Codex" : "Open VS Code",
+        onclick: () => {
+          if (task.sessionCwd) void Bridge.openProjectFolder(task.sessionCwd);
+          else if (task.source === "codex") void Bridge.openCodexChat(task.sessionId ?? null);
+          else void Bridge.openInVSCode(null);
+        },
       }),
     );
   } else if (task.id === "integration_n8n") {
@@ -92,7 +98,7 @@ function idleCard(task: AgentTask, openSettings: () => void): HTMLElement {
       }),
     );
   }
-  if (configured) {
+  if (configured && !isCodingAgent(task)) {
     actions.append(
       h("button", {
         class: "link-btn",
@@ -110,7 +116,7 @@ function idleCard(task: AgentTask, openSettings: () => void): HTMLElement {
   return h(
     "div",
     { class: "int-card" },
-    header(task.color, task.id === "integration_claude" ? "VS Code" : task.name, "Integration"),
+    header(task.color, isCodingAgent(task) ? providerName(task) : task.name, "Integration"),
     h("div", { class: "int-status" }, dot(statusColor, 5), h("span", { text: label })),
     actions,
   );

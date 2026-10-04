@@ -6,6 +6,7 @@ import { Sound } from "./core/sound";
 import { State, type Settings } from "./core/state";
 import { Island } from "./island/island";
 import { registerHookHandlers } from "./island/hooks";
+import { startCodexInfo } from "./island/codex-info";
 import { registerIntegrationHandlers, refreshConfigured } from "./island/integrations";
 
 async function main() {
@@ -54,6 +55,11 @@ async function main() {
 
   // The settings window writes preferences; apply them here without a restart.
   await onEvent<Settings>("settings-changed", (s) => {
+    const old = State.settings;
+    if (old.chatProvider !== s.chatProvider || old.model !== s.model || old.openaiModel !== s.openaiModel || old.openrouterModel !== s.openrouterModel) {
+      State.chatHistory = []; State.stateOverride = null;
+      void Bridge.chatReset();
+    }
     State.settings = { ...State.settings, ...s };
     island.applySettings();
     State.loadIntegrationTasks();
@@ -61,6 +67,7 @@ async function main() {
   });
 
   registerHookHandlers(island);
+  startCodexInfo();
   registerIntegrationHandlers(island);
 
   island.launch();

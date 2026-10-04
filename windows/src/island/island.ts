@@ -10,7 +10,8 @@ import {
   type IslandMode, type IslandViewName,
 } from "../core/layout";
 import { Sound } from "../core/sound";
-import { State } from "../core/state";
+import { State, isCodingAgent } from "../core/state";
+import { canvasDensity, resizeCanvas } from "../core/render-scale";
 import { BotEngine, hexToRGB } from "../mochi/engine";
 import { Greeting } from "../mochi/greeting";
 import { createMiniBot, pruneMiniBots, syncMiniBotStates, tickMiniBots } from "../mochi/minibots";
@@ -19,6 +20,7 @@ import { USC, UploadSeq } from "../upload/sequence";
 import { buildHeader, buildViews, type ViewActions, type ViewHost } from "../views/views";
 import { h } from "../views/dom";
 import { IslandStateMachine } from "./fsm";
+import { buildCompact } from "../views/compact";
 
 const BOT_OVERHANG = 40;
 /** Same margin as the Rust hit test (src-tauri/src/island.rs). */
@@ -36,6 +38,9 @@ export class Island {
   readonly fsm = new IslandStateMachine();
 
   private root: HTMLElement;
+  private dragging = false;
+  private zoom = new Tracked(1);
+  private get uiScale(): number { return this.zoom.value; }
   private islandEl!: HTMLElement;
   private clipEl!: HTMLElement;
   private contentEl!: HTMLElement;
@@ -44,6 +49,7 @@ export class Island {
   private botGlow!: HTMLElement;
   private greetingCanvas!: HTMLCanvasElement;
   private miniGrid!: HTMLElement;
+  private compact!: ReturnType<typeof buildCompact>;
   private countdown!: HTMLElement;
   private wakeStrip!: HTMLElement;
 
@@ -67,11 +73,11 @@ export class Island {
   private canvasPx = 0;
 
   // Rust starts the window at full size so the launch greeting has room.
-  private collapsed = false;
   private collapseTimer: number | null = null;
   private wasInIsland = false;
   /** Last shape handed to Rust for the click-through test. */
   private pushedRect = { x: -1, y: -1, w: -1, h: -1 };
+  private rectPushPending = false;
   private homeCollapseAt: number | null = null;
 
   // Bot hover → love (IslandWindowController.botHoverIn)
@@ -87,6 +93,8 @@ export class Island {
   /** Drop sequence bookkeeping: last tick played, and whether the ✓ has fired. */
   private uploadTens = 0;
   private uploadDone = false;
+  private ingestPending = false;
+  private uploadGeneration = 0;
 
   constructor(root: HTMLElement) {
     this.root = root;
@@ -112,8 +120,9 @@ export class Island {
         Sound.play("blip");
       },
       openTerminal: () => {
-        const cwd = State.focusTask?.sessionCwd ?? null;
-        void Bridge.openInVSCode(cwd);
+        const task = State.focusTask;
+        if (task?.source === "codex") void Bridge.openCodexChat(task.sessionId ?? null);
+        else void Bridge.openInVSCode(task?.sessionCwd ?? null);
       },
       // The ↗ button — same targets as openAgentTarget() on macOS.
       openTarget: () => {
@@ -127,7 +136,8 @@ export class Island {
           integration_notion: "https://notion.so",
           integration_calcom: "https://app.cal.com/bookings",
         };
-        if (task.id === "integration_claude") void Bridge.openInVSCode(task.sessionCwd ?? null);
+        if (task.source === "codex") void Bridge.openCodexChat(task.sessionId ?? null);
+        else if (isCodingAgent(task)) void Bridge.openInVSCode(task.sessionCwd ?? null);
         else if (task.id === "integration_n8n") void Bridge.openN8n();
         else if (urls[task.id]) void Bridge.openUrl(urls[task.id]);
       },
@@ -143,8 +153,8 @@ export class Island {
         State.pendingApproval = null;
         State.isPinned = false;
         this.fsm.pinned = false;
-        State.updateTask("integration_claude", "working");
-        State.setPillBadge("integration_claude", null);
+        State.updateTask(req.taskId, "working");
+        State.setPillBadge(req.taskId, null);
         this.setView(State.defaultView());
       },
       toggleSound: () => {
@@ -152,6 +162,28 @@ export class Island {
         Sound.setEnabled(State.settings.soundEnabled);
         void Bridge.saveSettings(State.settings);
         State.notify();
+      },
+      toggleTopmost: () => {
+        State.settings.alwaysOnTop = !State.settings.alwaysOnTop;
+        void Bridge.saveSettings(State.settings); State.notify();
+      },
+      toggleKeepOpen: () => {
+        State.settings.keepExpanded = !State.settings.keepExpanded;
+        this.fsm.applyVisibility(State.settings.keepExpanded, State.settings.keepMinimized, State.settings.minimizeHideInterval);
+        this.homeCollapseAt = State.settings.keepExpanded ? null : performance.now() + State.settings.autoCloseInterval * 1000;
+        void Bridge.saveSettings(State.settings); State.notify();
+      },
+      toggleKeepMinimized: () => {
+        State.settings.keepMinimized = !State.settings.keepMinimized;
+        this.applySettings(); void Bridge.saveSettings(State.settings);
+      },
+      togglePositionLock: () => {
+        State.settings.positionLocked = !State.settings.positionLocked;
+        void Bridge.saveSettings(State.settings); State.notify();
+      },
+      toggleEdgeSnap: () => {
+        State.settings.edgeSnap = !State.settings.edgeSnap;
+        void Bridge.saveSettings(State.settings); State.notify();
       },
       setVolume: (v) => {
         State.settings.soundVolume = v;
@@ -161,11 +193,12 @@ export class Island {
       },
       setAutoClose: (s) => {
         State.settings.autoCloseInterval = s;
-        this.fsm.homeToPetitDelay = s;
+        this.applySettings();
         void Bridge.saveSettings(State.settings);
         State.notify();
       },
       openSettingsWindow: () => void Bridge.openSettingsWindow(),
+      browseFile: () => void this.browseFile(),
       blip: () => Sound.play("blip"),
     };
 
@@ -174,6 +207,10 @@ export class Island {
     this.botCanvas = h("canvas", { id: "bot-canvas" });
     this.greetingCanvas = h("canvas", { id: "greeting-canvas" });
     this.miniGrid = h("div", { id: "mini-grid" });
+    this.compact = buildCompact(() => {
+      if (State.pendingApproval) { this.alert("approval"); return; }
+      this.fsm.click();
+    });
     this.countdown = h("div", { id: "countdown" });
 
     this.header = buildHeader(actions);
@@ -200,6 +237,7 @@ export class Island {
       this.greetingCanvas,
       this.uploadCanvas.el,
       this.contentEl,
+      this.compact.el,
     );
     this.islandEl = h(
       "div",
@@ -225,6 +263,7 @@ export class Island {
 
   private wireFsm() {
     this.fsm.homeToPetitDelay = State.settings.autoCloseInterval;
+    this.fsm.applyVisibility(State.settings.keepExpanded, State.settings.keepMinimized, State.settings.minimizeHideInterval);
     this.fsm.onTransition = (from, to) => {
       switch (to) {
         case "hidden":
@@ -285,7 +324,7 @@ export class Island {
 
   /** Navigating out of the drop flow ends the sequence, as on macOS. */
   private stopSequenceIfLeaving(view: IslandViewName) {
-    if (UploadSeq.isActive && !UPLOAD_VIEWS.has(view)) UploadSeq.deactivate();
+    if (UploadSeq.isActive && !UPLOAD_VIEWS.has(view)) { UploadSeq.deactivate(); this.uploadGeneration++; this.ingestPending=false; this.fsm.pinned=State.isPinned; }
   }
 
   expand(view: IslandViewName) {
@@ -310,6 +349,7 @@ export class Island {
     const grew = VIEW_LAYOUTS[view].height >= VIEW_LAYOUTS[State.view].height;
     State.view = view;
     State.lastActivity = performance.now();
+    this.updateWindowCollapsed();
     this.animateGeometry(!grew);
     State.notify();
   }
@@ -385,12 +425,38 @@ export class Island {
    * slow disk can never stall the animation — same as FileDropHandler on macOS.
    */
   private swallow(path: string) {
-    const name = path.split(/[\\/]/).pop() || "file";
-    State.droppedFile = { name, path };
-    State.promptContext = { kind: "file", name, path };
+    this.acceptFile(path.split(/[\\/]/).pop() || "file", () => Bridge.ingestFile(path));
+  }
+
+  private browseFile() {
+    const input=document.createElement("input");input.type="file";input.hidden=true;
+    input.accept=".pdf,image/png,image/jpeg,image/webp,image/gif,text/*,.json,.ts,.tsx,.js,.jsx,.py,.rs,.go,.cs,.cpp,.h,.yaml,.yml,.toml";
+    document.body.append(input);
+    const pinned=this.fsm.pinned;this.fsm.mouseEntered();this.fsm.pinned=true;this.homeCollapseAt=null;
+    const cancel=()=>{input.remove();this.fsm.pinned=pinned;if(!this.wasInIsland)this.fsm.mouseLeft();};
+    input.addEventListener("cancel",cancel,{once:true});
+    input.addEventListener("change",()=>{const file=input.files?.[0];input.remove();if(file)this.receiveFile(file);else cancel();},{once:true});
+    input.click();
+  }
+
+  private receiveFile(file: File) {
+    if(file.size>25*1024*1024){State.noteMessage="Choose a file smaller than 25 MB.";this.fsm.pinned=false;this.setView("note");if(!this.wasInIsland)this.fsm.mouseLeft();return;}
+    this.acceptFile(file.name,async()=>{
+      const data=await new Promise<string>((resolve,reject)=>{const reader=new FileReader();reader.onload=()=>resolve(String(reader.result).split(",",2)[1]);reader.onerror=()=>reject(new Error("Could not read this file."));reader.readAsDataURL(file);});
+      return Bridge.ingestUpload(file.name,data);
+    });
+  }
+
+  private acceptFile(name: string, load: () => Promise<{name:string;path:string}>) {
+    if(State.mode!=="expanded")this.setView("upload");
+    const generation=++this.uploadGeneration;
+    this.ingestPending=true;this.fsm.pinned=true;this.fsm.mouseEntered();this.homeCollapseAt=null;
+    State.droppedFile = { name, path:"" };
+    State.promptContext = null;
     State.chatHistory = [];
     void Bridge.chatReset();
 
+    if(!UploadSeq.isActive)UploadSeq.enterZone(320,80);
     UploadSeq.performDrop(State.uploadDuration);
     this.uploadTens = 0;
     this.uploadDone = false;
@@ -404,17 +470,22 @@ export class Island {
     this.setView("uploading");
     this.ensureRunning();
 
-    void Bridge.ingestFile(path)
+    void load()
       .then((file) => {
+        if(generation!==this.uploadGeneration)return;
+        this.ingestPending=false;
         State.droppedFile = { name: file.name, path: file.path };
         State.promptContext = { kind: "file", name: file.name, path: file.path };
         State.notify();
       })
       .catch((err) => {
+        if(generation!==this.uploadGeneration)return;
+        this.ingestPending=false;this.fsm.pinned=State.isPinned;State.promptContext=null;
         UploadSeq.deactivate();
         State.noteMessage = String(err).replace(/^Error:\s*/, "");
         this.engine.animateMorph(0);
         this.setView("note");
+        if(!this.wasInIsland)this.fsm.mouseLeft();
         Sound.play("error");
         window.setTimeout(() => this.setView(State.defaultView()), 2400);
       });
@@ -442,8 +513,10 @@ export class Island {
       this.engine.triggerEmote("happy");
     }
     // The extra second is the grow-back, after which the choose card is up.
-    if (since >= PRE_PROGRESS + dur + 1 && State.view === "uploading") {
+    if (since >= PRE_PROGRESS + dur + 1 && !this.ingestPending && State.view === "uploading") {
+      this.fsm.pinned=State.isPinned;
       this.setView("choose");
+      if(!this.wasInIsland)this.fsm.mouseLeft();
     }
   }
 
@@ -457,26 +530,38 @@ export class Island {
 
   private animateGeometry(shrinking: boolean) {
     const { w, h, r } = this.targetSize();
-    if (shrinking) {
-      this.width.curveTowards(w);
-      this.height.curveTowards(h);
-      this.radius.curveTowards(r);
-    } else {
-      this.width.springTo(w);
-      this.height.springTo(h);
-      this.radius.springTo(r);
-    }
+    const scale = Math.max(.75, Math.min(1.5, State.mode === "expanded" ? State.settings.expandedScale : State.settings.compactScale));
+    if (this.width.target === w * scale && this.height.target === h * scale && this.zoom.target === scale) return;
+    const duration = shrinking ? 280 : 320, start = performance.now();
+    // One clock in both directions avoids mismatched scale/size spring overshoot.
+    this.width.curveTowards(w * scale, duration, start);
+    this.height.curveTowards(h * scale, duration, start);
+    this.radius.curveTowards(r * scale, duration, start);
+    this.zoom.curveTowards(scale, duration, start);
     this.ensureRunning();
   }
 
   private applyGeometry() {
-    const w = this.width.value;
-    const hh = this.height.value;
-    const r = this.radius.value;
+    const scale = this.uiScale;
+    const layoutScale = this.zoom.target;
+    State.renderScale = layoutScale;
+    this.root.style.inset = "auto";
+    this.root.style.left = this.root.style.top = "0";
+    this.root.style.width = `${window.innerWidth / layoutScale}px`;
+    this.root.style.height = `${window.innerHeight / layoutScale}px`;
+    this.root.style.transform = "none";
+    this.root.style.zoom = String(layoutScale);
+    const w = this.width.value / scale;
+    const hh = this.height.value / scale;
+    const r = this.radius.value / scale;
     this.islandEl.style.width = `${w}px`;
     this.islandEl.style.height = `${hh}px`;
     this.islandEl.style.borderRadius = `0 0 ${r}px ${r}px`;
-    this.islandEl.style.transform = `translateX(-50%)`;
+    this.islandEl.style.transformOrigin = "50% 0";
+    this.islandEl.style.transform = `translateX(-50%) scale(${scale / layoutScale})`;
+    const rect = this.visualRect();
+    this.islandEl.style.left = `${(rect.x + rect.w / 2) / layoutScale}px`;
+    this.islandEl.style.top = `${rect.y / layoutScale}px`;
     // These follow the island as it resizes, so they belong here rather than in
     // the state-driven DOM sync.
     this.miniGrid.style.left = `${w - 40 - 14.5}px`;
@@ -484,19 +569,26 @@ export class Island {
     this.greetingCanvas.style.left = `${(w - EXPANDED_W) / 2}px`;
     this.uploadCanvas.el.style.left = `${(w - EXPANDED_W) / 2}px`;
 
-    const rect = { x: (PANEL_W - w) / 2, y: 0, w, h: hh };
     const p = this.pushedRect;
-    if (Math.abs(p.x - rect.x) > 0.5 || Math.abs(p.w - rect.w) > 0.5 || Math.abs(p.h - rect.h) > 0.5) {
+    if (!this.rectPushPending && (Math.abs(p.x - rect.x) > 0.5 || Math.abs(p.y - rect.y) > 0.5 || Math.abs(p.w - rect.w) > 0.5 || Math.abs(p.h - rect.h) > 0.5)) {
       this.pushedRect = rect;
-      void Bridge.setIslandRect(rect.x, rect.y, rect.w, rect.h);
+      this.rectPushPending = true;
+      void Bridge.setIslandRect(rect.x, rect.y, rect.w, rect.h).finally(() => { this.rectPushPending = false; });
     }
   }
 
-  /** Island rect in window coordinates (origin top-left of the 720×320 window). */
-  private islandRect(): { x: number; y: number; w: number; h: number } {
-    const w = this.width.value;
-    const hh = this.height.value;
-    return { x: (PANEL_W - w) / 2, y: 0, w, h: hh };
+  private visualRect() {
+    const s = State.settings, w = this.width.value, hh = this.height.value;
+    const maxW = Math.max(EXPANDED_W * s.expandedScale, 288 * s.compactScale);
+    const maxH = PANEL_H * s.expandedScale;
+    const x = s.freePlacement ? clamp(s.positionX, 0, 1) : .5;
+    const y = s.freePlacement ? clamp(s.positionY, 0, 1) : 0;
+    return { x: (window.innerWidth - w) / 2 + (maxW - w) * (x - .5), y: Math.max(0, maxH - hh) * y, w, h: hh };
+  }
+
+  private islandRect() {
+    const r = this.visualRect(), s = this.uiScale;
+    return { x: r.x / s, y: r.y / s, w: r.w / s, h: r.h / s };
   }
 
   // ── Window collapse (hidden → tiny wake strip, zero polling) ────────────────
@@ -512,19 +604,28 @@ export class Island {
       this.collapseTimer = window.setTimeout(() => {
         this.collapseTimer = null;
         if (State.mode !== "hidden") return;
-        this.collapsed = true;
         void Bridge.setCollapsed(true);
       }, 420);
-    } else if (this.collapsed) {
+    } else {
       // Grow the window back before the island animates open.
-      this.collapsed = false;
-      void Bridge.setCollapsed(false);
+      void Bridge.setCollapsed(false, islandSize(State.mode, State.view, State.chatHistory.length).h);
     }
   }
 
   // ── Input ───────────────────────────────────────────────────────────────────
 
   private wireInput() {
+    window.addEventListener("resize", () => this.ensureRunning());
+    this.islandEl.addEventListener("pointerdown", (e) => {
+      const target = e.target as HTMLElement;
+      const top = e.clientY - this.islandEl.getBoundingClientRect().top;
+      if (e.button !== 0 || !IS_TAURI || State.settings.positionLocked || target.closest("button,input,select,textarea") || !(target.closest("#header") || top < 5 * this.uiScale)) return;
+      e.preventDefault(); e.stopPropagation();
+      this.dragging = true;
+      const pinned = this.fsm.pinned;
+      this.fsm.mouseEntered(); this.fsm.pinned = true; this.homeCollapseAt = null;
+      void Bridge.dragIsland().catch(error => { void Bridge.log(`Could not move island: ${String(error)}`); }).finally(() => { this.dragging = false; this.fsm.pinned = pinned; State.lastActivity = performance.now(); });
+    });
     // The wake strip is the only thing the OS can hit while the island is hidden.
     this.wakeStrip.addEventListener("mouseenter", () => {
       Sound.resume();
@@ -532,13 +633,15 @@ export class Island {
     });
 
     this.islandEl.addEventListener("mousedown", (e) => {
+      if (this.dragging) return;
       Sound.resume();
       State.lastActivity = performance.now();
       if (State.mode !== "expanded") {
+        if ((e.target as HTMLElement).closest("#compact-limits")) return;
         this.fsm.click();
         return;
       }
-      if (this.isBotHit(e.clientX, e.clientY)) {
+      if (this.isBotHit(e.clientX / this.uiScale, e.clientY / this.uiScale)) {
         this.cancelBotHover();
         this.engine.slap();
       }
@@ -550,6 +653,9 @@ export class Island {
     });
 
     void onDragDrop((e) => this.onDragDrop(e));
+    // HTML5 fallback also supports WebView's own file target and browser previews.
+    this.islandEl.addEventListener("dragover",e=>{e.preventDefault();if(e.dataTransfer)e.dataTransfer.dropEffect="copy";});
+    this.islandEl.addEventListener("drop",e=>{e.preventDefault();const file=e.dataTransfer?.files[0];if(file){State.fileDragOver=false;this.receiveFile(file);}});
 
     // Outside Tauri (plain browser) drive the cursor from DOM events so the
     // island can be inspected with `npm run dev`.
@@ -560,6 +666,8 @@ export class Island {
 
   /** Cursor in window-logical coordinates. */
   onCursor(x: number, y: number) {
+    if (this.dragging) return;
+    x /= this.uiScale; y /= this.uiScale;
     State.mouse = { x, y };
     const rect = this.islandRect();
     State.mouseInIsland = { x: x - rect.x, y: y - rect.y };
@@ -674,6 +782,7 @@ export class Island {
     this.width.step(dt, nowMs);
     this.height.step(dt, nowMs);
     this.radius.step(dt, nowMs);
+    this.zoom.step(dt, nowMs);
     this.applyGeometry();
 
     if (this.dirty) {
@@ -690,7 +799,7 @@ export class Island {
     if (greetingActive) {
       const gctx = this.greetingCanvas.getContext("2d");
       if (gctx) {
-        const dpr = Math.min(2, window.devicePixelRatio || 1);
+        const dpr = resizeCanvas(this.greetingCanvas, EXPANDED_W, 150);
         gctx.setTransform(dpr, 0, 0, dpr, 0, 0);
         this.greeting.draw(gctx);
       }
@@ -717,12 +826,13 @@ export class Island {
     // sweep — so a hidden island went on burning frames in exactly the states it
     // spends most of its life in. Geometry still has to finish retracting.
     const settling =
-      this.width.animating || this.height.animating || this.radius.animating;
+      this.width.animating || this.height.animating || this.radius.animating || this.zoom.animating;
     const busy = State.mode === "hidden"
       ? settling
       : settling ||
         !this.botCx.settled || !this.botCy.settled || !this.botSize.settled ||
-        greetingActive || this.engine.busy || UploadSeq.isActive;
+          greetingActive || this.engine.busy || UploadSeq.isActive ||
+          (State.mode === "expanded" && !!this.views.get(State.view)?.animating?.());
 
     if (busy) {
       requestAnimationFrame(this.frame);
@@ -733,7 +843,7 @@ export class Island {
   };
 
   private updateBotTargets() {
-    const p = botPosition(State.mode, State.view, this.height.value, State.uploadProgress);
+    const p = botPosition(State.mode, State.view, this.height.value / this.uiScale, State.uploadProgress);
     this.botCx.target = p.cx;
     this.botCy.target = p.cy;
     this.botSize.target = p.diameter / 0.6;
@@ -762,13 +872,10 @@ export class Island {
     const size = this.botSize.value;
     const w = Math.max(1, Math.round(size));
     const hCss = w + BOT_OVERHANG;
-    const dpr = Math.min(2, window.devicePixelRatio || 1);
-    if (this.canvasPx !== w) {
+    const dpr = canvasDensity();
+    if (this.canvasPx !== w || this.botCanvas.width !== Math.round(w * dpr) || this.botCanvas.height !== Math.round(hCss * dpr)) {
       this.canvasPx = w;
-      this.botCanvas.width = Math.round(w * dpr);
-      this.botCanvas.height = Math.round(hCss * dpr);
-      this.botCanvas.style.width = `${w}px`;
-      this.botCanvas.style.height = `${hCss}px`;
+      resizeCanvas(this.botCanvas, w, hCss, dpr);
     }
     this.botCanvas.style.left = `${this.botCx.value - w / 2}px`;
     this.botCanvas.style.top = `${this.botCy.value - BOT_OVERHANG / 2 - hCss / 2}px`;
@@ -777,7 +884,7 @@ export class Island {
     if (!ctx) return;
 
     const focus = State.focusTask;
-    this.engine.bodyColor = focus?.isIntegration ? hexToRGB(focus.color) : null;
+    this.engine.bodyColor = /^#[0-9a-f]{6}$/i.test(State.settings.petColor) ? hexToRGB(State.settings.petColor) : focus?.isIntegration ? hexToRGB(focus.color) : null;
     this.engine.particleOverhang = BOT_OVERHANG;
     this.engine.lookX = this.lookX();
     this.engine.lookY = this.lookY();
@@ -804,11 +911,11 @@ export class Island {
   }
 
   private lookY(): number {
-    return -Math.tanh((State.mouse.y - this.botCy.value) / 200);
+    return -Math.tanh((State.mouse.y - this.islandRect().y - this.botCy.value) / 200);
   }
 
   private updateCountdown(nowMs: number) {
-    if (State.mode !== "expanded" || State.isPinned || this.homeCollapseAt == null) {
+    if (State.mode !== "expanded" || State.isPinned || State.settings.keepExpanded || this.homeCollapseAt == null) {
       this.countdown.style.width = "0px";
       return;
     }
@@ -822,8 +929,11 @@ export class Island {
   // ── DOM sync ────────────────────────────────────────────────────────────────
 
   private syncDom() {
+    this.root.style.setProperty("--accent", /^#[0-9a-f]{6}$/i.test(State.settings.petColor) ? State.settings.petColor : "#a8d8cc");
     const expanded = State.mode === "expanded";
     const greetingActive = expanded && State.view === "greeting";
+    this.compact.el.classList.toggle("on", State.mode === "compact");
+    if (State.mode === "compact") this.compact.sync();
 
     this.contentEl.style.opacity = expanded && !greetingActive ? "1" : "0";
     this.contentEl.style.pointerEvents = expanded && !greetingActive ? "auto" : "none";
@@ -874,6 +984,10 @@ export class Island {
     Sound.setEnabled(State.settings.soundEnabled);
     Sound.setVolume(State.settings.soundVolume);
     this.fsm.homeToPetitDelay = State.settings.autoCloseInterval;
+    this.fsm.applyVisibility(State.settings.keepExpanded, State.settings.keepMinimized, State.settings.minimizeHideInterval);
+    this.homeCollapseAt = !this.wasInIsland && !State.settings.keepExpanded ? performance.now() + State.settings.autoCloseInterval * 1000 : null;
+    this.animateGeometry(false);
+    this.updateWindowCollapsed();
     State.notify();
   }
 

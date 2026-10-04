@@ -1,12 +1,14 @@
 {
   "name": "coucou-windows",
   "private": true,
-  "version": "0.1.1",
+  "version": "0.1.2",
   "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
+    "test:codex": "node scripts/test-codex.mjs",
+    "test:codex:launcher": "node scripts/test-codex-launcher.mjs",
     "icons": "node scripts/gen-icons.mjs",
     "tauri": "tauri",
     "predev": "cargo build --release -p coucou-hook",
@@ -19,6 +21,7 @@
     "vite": "^6"
   },
   "dependencies": {
-    "@tauri-apps/api": "^2"
+    "@tauri-apps/api": "^2",
+    "highlight.js": "^11.12.0"
   }
 }

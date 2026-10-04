@@ -10,8 +10,12 @@ labels: bug
 
 **How to reproduce**
 
-**macOS version**
+**Windows version**
 
-**Mac model**
+**Coucou version or commit**
 
-**Coucou version**
+**Codex / Claude Code version, if relevant**
+
+**Monitor count and display scaling, for layout issues**
+
+Remove API keys, personal chat text, and account details from screenshots and logs.

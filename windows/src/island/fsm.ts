@@ -18,6 +18,20 @@ export class IslandStateMachine {
   greetHoverCollapseDelay = 10;
   /** An alert waiting for an answer stays open, even when the mouse leaves. */
   pinned = false;
+  keepExpanded = false;
+  keepMinimized = false;
+  private hovered = false;
+
+  applyVisibility(keepExpanded: boolean, keepMinimized: boolean, hideDelay: number) {
+    this.keepExpanded = keepExpanded;
+    this.keepMinimized = keepMinimized;
+    this.petitToHiddenDelay = hideDelay;
+    this.cancelTimers();
+    if (this.state === "home") this.scheduleHomeCollapse();
+    if (this.state === "petit") this.schedulePetitHide();
+    if (this.state === "coucou") this.scheduleGreetCollapse(this.greetAutoCollapseDelay);
+  }
+
 
   private petitHide: number | null = null;
   private homeCollapse: number | null = null;
@@ -31,6 +45,7 @@ export class IslandStateMachine {
   }
 
   mouseEntered() {
+    this.hovered = true;
     switch (this.state) {
       case "hidden":
         this.cancelTimers();
@@ -49,6 +64,7 @@ export class IslandStateMachine {
   }
 
   mouseLeft() {
+    this.hovered = false;
     switch (this.state) {
       case "hidden":
         break;
@@ -106,6 +122,7 @@ export class IslandStateMachine {
 
   private schedulePetitHide() {
     this.clear("petitHide");
+    if (this.keepMinimized || this.hovered) return;
     this.petitHide = window.setTimeout(() => {
       this.petitHide = null;
       if (this.state === "petit") this.transition("hidden");
@@ -114,7 +131,7 @@ export class IslandStateMachine {
 
   private scheduleHomeCollapse() {
     this.clear("homeCollapse");
-    if (this.pinned) return;
+    if (this.pinned || this.keepExpanded || this.hovered) return;
     this.homeCollapse = window.setTimeout(() => {
       this.homeCollapse = null;
       if (this.state === "home") this.transition("petit");

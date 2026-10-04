@@ -6,6 +6,17 @@ use tauri::{AppHandle, Emitter};
 
 use crate::island::WINDOW_LABEL;
 
+/// Keep the app and its pollers alive while changing notification-area visibility.
+/// A hidden cold start skips icon creation, so it never flashes in the tray.
+pub fn set_hidden(app: &AppHandle, hidden: bool) -> tauri::Result<()> {
+    if let Some(icon) = app.tray_by_id("coucou") {
+        icon.set_visible(!hidden)?;
+    } else if !hidden {
+        build(app)?;
+    }
+    Ok(())
+}
+
 pub fn build(app: &AppHandle) -> tauri::Result<()> {
     let open = MenuItem::with_id(app, "open", "Open Coucou", true, None::<&str>)?;
     let settings = MenuItem::with_id(app, "settings", "Settings…", true, None::<&str>)?;

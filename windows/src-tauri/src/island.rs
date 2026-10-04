@@ -5,8 +5,8 @@
 // centre of the main display inside a borderless, transparent, always-on-top
 // window that never takes focus.
 
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Condvar, Mutex};
+use std::sync::atomic::{AtomicBool, AtomicIsize, Ordering};
+use std::sync::{Arc, Condvar, Mutex, OnceLock};
 use std::time::Duration;
 
 use serde::Serialize;
@@ -31,6 +31,39 @@ pub const STRIP_W: f64 = 240.0;
 pub const STRIP_H: f64 = 6.0;
 
 pub const WINDOW_LABEL: &str = "island";
+
+#[derive(Clone,Copy)]
+struct NativeBounds { x:i32,y:i32,w:i32,h:i32 }
+static EXPECTED_BOUNDS:Mutex<Option<NativeBounds>>=Mutex::new(None);
+static ORIGINAL_PROC:AtomicIsize=AtomicIsize::new(0);
+static DRAG_GATE:OnceLock<Arc<PollGate>>=OnceLock::new();
+
+/// The island is not resizable. Keep late native placement requests from
+/// replacing its saved envelope; Windows still owns movement during a drag.
+pub fn protect_geometry(win:&WebviewWindow,gate:Arc<PollGate>) {
+    use windows::Win32::UI::WindowsAndMessaging::GWLP_WNDPROC;
+    let Some(hwnd)=hwnd_of(win) else{return};
+    let old=unsafe{GetWindowLongPtrW(hwnd,GWLP_WNDPROC)};
+    if old==0{return;}
+    let _=DRAG_GATE.set(gate);
+    ORIGINAL_PROC.store(old,Ordering::Relaxed);
+    unsafe{SetWindowLongPtrW(hwnd,GWLP_WNDPROC,bounds_proc as *const () as isize);}
+}
+
+unsafe extern "system" fn bounds_proc(hwnd:HWND,msg:u32,w:windows::Win32::Foundation::WPARAM,l:LPARAM)->windows::Win32::Foundation::LRESULT {
+    use windows::Win32::UI::WindowsAndMessaging::{CallWindowProcW,WM_WINDOWPOSCHANGING,WINDOWPOS,WNDPROC,SWP_NOSIZE,SWP_NOMOVE};
+    if msg==WM_WINDOWPOSCHANGING && !DRAG_GATE.get().is_some_and(|g|g.moving.load(Ordering::Relaxed)) {
+        let p=unsafe{&mut *(l.0 as *mut WINDOWPOS)};
+        if p.x>-30000&&p.y>-30000 {
+            if let Some(b)=*EXPECTED_BOUNDS.lock().unwrap() {
+                if !p.flags.contains(SWP_NOMOVE){p.x=b.x;p.y=b.y;}
+                if !p.flags.contains(SWP_NOSIZE)&&p.cx>0&&p.cy>0{p.cx=b.w;p.cy=b.h;}
+            }
+        }
+    }
+    let old:WNDPROC=unsafe{std::mem::transmute(ORIGINAL_PROC.load(Ordering::Relaxed))};
+    unsafe{CallWindowProcW(old,hwnd,msg,w,l)}
+}
 
 /// Margin around the island that still counts as "on the island", in logical px.
 /// Wider than the macOS 6 pt because a click must never be swallowed.
@@ -68,6 +101,8 @@ pub struct PollGate {
     cv: Condvar,
     pub collapsed: AtomicBool,
     pub rect: Mutex<IslandRect>,
+    pub visible_height: Mutex<f64>,
+    pub moving: AtomicBool,
     /// Mirrors the window flag so we only call into Win32 when it changes.
     ignoring: AtomicBool,
 }
@@ -79,6 +114,8 @@ impl PollGate {
             cv: Condvar::new(),
             collapsed: AtomicBool::new(true),
             rect: Mutex::new(IslandRect::default()),
+            visible_height: Mutex::new(160.0),
+            moving: AtomicBool::new(false),
             ignoring: AtomicBool::new(false),
         }
     }
@@ -169,8 +206,11 @@ fn monitor_contains(m: &Monitor, x: f64, y: f64) -> bool {
 }
 
 /// The display the island lives on: the primary one, or the one under the cursor.
-fn target_monitor(app: &AppHandle, pref: &str) -> Option<Monitor> {
+pub(crate) fn target_monitor(app: &AppHandle, pref: &str) -> Option<Monitor> {
     let monitors = app.available_monitors().ok()?;
+    if let Some(id) = pref.strip_prefix("monitor:") {
+        if let Some(m) = monitors.iter().find(|m| monitor_id(m) == id) { return Some(m.clone()); }
+    }
     if pref == "cursor" {
         if let Some((cx, cy)) = cursor_physical() {
             if let Some(m) = monitors.iter().find(|m| monitor_contains(m, cx, cy)) {
@@ -182,6 +222,34 @@ fn target_monitor(app: &AppHandle, pref: &str) -> Option<Monitor> {
         .ok()
         .flatten()
         .or_else(|| monitors.into_iter().next())
+}
+
+fn monitor_id(m: &Monitor) -> String {
+    m.name().cloned().unwrap_or_else(|| format!("{}:{}", m.position().x, m.position().y))
+}
+
+#[derive(Serialize)]
+#[serde(rename_all="camelCase")]
+pub struct MonitorChoice { id: String, label: String, width: u32, height: u32, x:i32, y:i32, work_x:i32, work_y:i32, work_width:u32, work_height:u32, scale:f64 }
+
+#[tauri::command]
+pub fn monitor_choices(app: AppHandle) -> Vec<MonitorChoice> {
+    let primary = app.primary_monitor().ok().flatten();
+    app.available_monitors().unwrap_or_default().iter().enumerate().map(|(i,m)| {
+        let is_primary = primary.as_ref().is_some_and(|p| p.position() == m.position());
+        MonitorChoice { id: format!("monitor:{}", monitor_id(m)),
+            label: format!("Monitor {}{} · {} × {}", i + 1, if is_primary { " (primary)" } else { "" }, m.size().width, m.size().height),
+            width: m.size().width, height: m.size().height, x:m.position().x, y:m.position().y, work_x:m.work_area().position.x, work_y:m.work_area().position.y, work_width:m.work_area().size.width, work_height:m.work_area().size.height, scale:m.scale_factor() }
+    }).collect()
+}
+
+fn placement(mp: (i32,i32), ms: (u32,u32), pw: u32, visible_w: u32, visible_h: u32, free: bool, x: f64, y: f64) -> (i32,i32) {
+    let fraction = |v: f64, fallback: f64| if v.is_finite() {v.clamp(0.0,1.0)} else {fallback};
+    let center = if free {fraction(x,0.5)} else {0.5};
+    let top = if free {fraction(y,0.0)} else {0.0};
+    let left = ((ms.0.saturating_sub(visible_w)) as f64 * center + visible_w as f64 / 2.0 - pw as f64 / 2.0).round() as i32;
+    let y = ((ms.1.saturating_sub(visible_h)) as f64 * top).round() as i32;
+    (mp.0 + left, mp.1 + y)
 }
 
 pub fn screen_info(app: &AppHandle, pref: &str) -> ScreenInfo {
@@ -203,25 +271,119 @@ pub fn screen_info(app: &AppHandle, pref: &str) -> ScreenInfo {
 }
 
 /// Places and sizes the window. `collapsed` picks the wake strip instead of the panel.
-pub fn apply_geometry(app: &AppHandle, pref: &str, collapsed: bool) {
+pub fn apply_geometry(app: &AppHandle, settings: &crate::settings::Settings, collapsed: bool, visible_h: Option<f64>) {
     let Some(win) = window(app) else { return };
-    let Some(m) = target_monitor(app, pref) else { return };
+    let Some(m) = target_monitor(app, &settings.screen) else { return };
 
     let scale = m.scale_factor();
-    let mp = *m.position();
-    let ms = *m.size();
+    let area=m.work_area();let mp=area.position;let ms=area.size;
+    let compact=settings.compact_scale.clamp(0.75,1.5);let expanded=settings.expanded_scale.clamp(0.75,1.5);
+    let envelope=compact.max(expanded);
+    let (lw,lh,max_w,max_h)=if collapsed {(STRIP_W*compact,STRIP_H*compact,STRIP_W*compact,STRIP_H*compact)}
+      else {(PANEL_W*envelope,PANEL_H*envelope,(640.0*expanded).max(288.0*compact),PANEL_H*expanded)};
+    let pw=(lw*scale).round().max(1.0) as u32;let ph=(lh*scale).round().max(1.0) as u32;
+    // Reserve all view sizes once. Visible children move within this fixed window.
+    let (x,y)=placement((mp.x,mp.y),(ms.width,ms.height),pw,(max_w*scale).round() as u32,(max_h*scale).round() as u32,
+        settings.free_placement,settings.position_x,settings.position_y);
+    let _=visible_h;
 
-    let (lw, lh) = if collapsed { (STRIP_W, STRIP_H) } else { (PANEL_W, PANEL_H) };
-    let pw = (lw * scale).round().max(1.0) as u32;
-    let ph = (lh * scale).round().max(1.0) as u32;
-    let x = mp.x + (ms.width as i32 - pw as i32) / 2;
-    let y = mp.y;
+    *EXPECTED_BOUNDS.lock().unwrap()=Some(NativeBounds{x,y,w:pw as i32,h:ph as i32});
 
     let _ = win.set_size(PhysicalSize::new(pw, ph));
     let _ = win.set_position(PhysicalPosition::new(x, y));
     // Moving across displays can rescale the window: re-assert the physical size.
     let _ = win.set_size(PhysicalSize::new(pw, ph));
-    let _ = win.set_always_on_top(true);
+    let _ = win.set_always_on_top(settings.always_on_top);
+}
+
+#[derive(Clone, Copy)]
+struct SnapMonitor { x: f64, y: f64, w: f64, h: f64, dpi: f64 }
+// Only a tiny correction at release, close to both edges of a corner.
+fn snap_position(x: f64, y: f64, w: f64, h: f64, monitors: &[SnapMonitor]) -> (f64,f64) {
+    let cx=x+w/2.0;let cy=y+h/2.0;
+    let distance=|m:&SnapMonitor|(cx-cx.clamp(m.x,m.x+m.w)).powi(2)+(cy-cy.clamp(m.y,m.y+m.h)).powi(2);
+    let Some(m)=monitors.iter().min_by(|a,b|distance(a).total_cmp(&distance(b))) else {return(x,y)};
+    if w>m.w||h>m.h{return(x,y)}
+    let right=m.x+m.w-w;let bottom=m.y+m.h-h;
+    let edge_x=if(x-m.x).abs()<(x-right).abs(){m.x}else{right};
+    let edge_y=if(y-m.y).abs()<(y-bottom).abs(){m.y}else{bottom};
+    if(x-edge_x).abs()<=3.0*m.dpi&&(y-edge_y).abs()<=3.0*m.dpi {(edge_x,edge_y)}else{(x,y)}
+}
+
+/// Windows owns the drag loop. Only its final coordinates are saved.
+#[tauri::command]
+pub async fn drag_island(app: AppHandle) -> Result<(),String> {
+    let shared=app.state::<crate::Shared>();
+    let prefs=shared.settings.lock().unwrap().clone();
+    if prefs.position_locked { return Err("Position is locked".into()); }
+    let win = window(&app).ok_or("Island is unavailable")?;
+    shared.gate.moving.store(true,Ordering::Relaxed);
+    if let Err(e)=win.start_dragging(){shared.gate.moving.store(false,Ordering::Relaxed);return Err(e.to_string())}
+    tauri::async_runtime::spawn_blocking(move || {
+        std::thread::sleep(Duration::from_millis(150));
+        while left_button_down() {std::thread::sleep(Duration::from_millis(30));}
+        let result=capture_placement(&app);
+        app.state::<crate::Shared>().gate.moving.store(false,Ordering::Relaxed);
+        result
+    }).await.map_err(|e|e.to_string())?
+}
+
+pub fn capture_placement(app:&AppHandle) -> Result<(),String> {
+    let win=window(app).ok_or("Island is unavailable")?;
+    let mut pos=win.outer_position().map_err(|e|e.to_string())?;
+    let scale=win.scale_factor().unwrap_or(1.0);
+    let shared=app.state::<crate::Shared>();
+    let rect=*shared.gate.rect.lock().unwrap();
+    let mut center_x=pos.x as f64+(rect.x+rect.w/2.0)*scale;
+    let center_y=pos.y as f64+(rect.y+rect.h/2.0)*scale;
+    let m=app.available_monitors().map_err(|e|e.to_string())?.into_iter().find(|m|monitor_contains(m,center_x,center_y)).or_else(||win.current_monitor().ok().flatten()).ok_or("Monitor is unavailable")?;
+    let area=m.work_area();let mp=&area.position;let ms=&area.size;
+    let visible_w=rect.w*scale;let visible_h=rect.h*scale;
+    let prefs=shared.settings.lock().unwrap().clone();
+    if prefs.position_locked {return Ok(());}
+    let mut left=center_x-visible_w/2.0;let mut top=pos.y as f64+rect.y*scale;
+    if prefs.edge_snap {
+        (left,top)=snap_position(left,top,visible_w,visible_h,&[SnapMonitor{x:mp.x as f64,y:mp.y as f64,w:ms.width as f64,h:ms.height as f64,dpi:m.scale_factor()}]);
+    }
+    // Always keep the visible shape inside the chosen display, independently of assist.
+    left=left.clamp(mp.x as f64,(mp.x as f64+ms.width as f64-visible_w).max(mp.x as f64));
+    top=top.clamp(mp.y as f64,(mp.y as f64+ms.height as f64-visible_h).max(mp.y as f64));
+    pos=PhysicalPosition::new((left-rect.x*scale).round() as i32,(top-rect.y*scale).round() as i32);
+    let _=win.set_position(pos);center_x=left+visible_w/2.0;
+    let mut settings=shared.settings.lock().unwrap();
+    settings.screen=format!("monitor:{}",monitor_id(&m));settings.free_placement=true;
+    settings.position_x=((center_x-visible_w/2.0-mp.x as f64)/(ms.width as f64-visible_w).max(1.0)).clamp(0.0,1.0);
+    settings.position_y=((top-mp.y as f64)/(ms.height as f64-visible_h).max(1.0)).clamp(0.0,1.0);
+    crate::settings::save(&settings).map_err(|e|e.to_string())?;
+    let updated=settings.clone();drop(settings);
+    apply_geometry(app,&updated,false,None);
+    let _=app.emit("settings-changed",updated);
+    Ok(())
+}
+
+#[cfg(test)]
+mod placement_tests {
+    use super::*;
+    #[test]
+    fn placement_handles_second_display_edges_and_bad_saved_values() {
+        assert_eq!(placement((-1920,0),(1920,1080),720,720,32,false,0.0,0.8),(-1320,0));
+        assert_eq!(placement((-1920,0),(1920,1080),720,720,32,true,1.0,1.0),(-720,1048));
+        assert_eq!(placement((-1920,0),(1920,1080),720,720,320,true,1.0,1.0),(-720,760));
+        assert_eq!(placement((0,0),(1920,1080),720,720,32,true,f64::NAN,f64::INFINITY),(600,0));
+        assert_eq!(placement((0,0),(1920,1080),720,288,32,true,0.0,1.0),(-216,1048));
+    }
+    #[test]
+    fn corner_assist_only_corrects_three_pixels_on_release() {
+        let monitors=[SnapMonitor{x:0.0,y:0.0,w:2560.0,h:1440.0,dpi:1.0},SnapMonitor{x:-1080.0,y:-313.0,w:1080.0,h:1920.0,dpi:1.0}];
+        assert_eq!(snap_position(2.0,2.0,640.0,160.0,&monitors),(0.0,0.0));
+        assert_eq!(snap_position(4.0,2.0,640.0,160.0,&monitors),(4.0,2.0));
+        assert_eq!(snap_position(2.0,400.0,640.0,160.0,&monitors),(2.0,400.0));
+        assert_eq!(snap_position(1918.0,1278.0,640.0,160.0,&monitors),(1920.0,1280.0));
+        assert_eq!(snap_position(-1078.0,-311.0,288.0,32.0,&monitors),(-1080.0,-313.0));
+        assert_eq!(snap_position(-290.0,1573.0,288.0,32.0,&monitors),(-288.0,1575.0));
+        assert_eq!(snap_position(700.0,400.0,640.0,160.0,&monitors),(700.0,400.0));
+        assert_eq!(snap_position(4.0,4.0,640.0,160.0,&[SnapMonitor{x:0.0,y:0.0,w:2560.0,h:1440.0,dpi:2.0}]),(0.0,0.0));
+    }
 }
 
 fn hwnd_of(win: &WebviewWindow) -> Option<HWND> {

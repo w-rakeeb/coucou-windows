@@ -2,6 +2,9 @@
 // Drawn on a 24×24 grid so they read at the same optical size.
 
 export const ICONS = {
+  pin: "M8 2h8v2h-1v5l3 3v2h-5v8h-2v-8H6v-2l3-3V4H8V2z",
+  lock: "M7 10V7a5 5 0 0 1 10 0v3h2v12H5V10h2zm2 0h6V7a3 3 0 0 0-6 0v3zm2 5v3h2v-3h-2z",
+  magnet: "M4 3h5v8a3 3 0 0 0 6 0V3h5v8a8 8 0 0 1-16 0V3zm2 2v3h1V5H6zm11 0v3h1V5h-1z",
   // house.fill
   house: "M12 3.2 2.8 10.6V21h6.6v-5.4h5.2V21h6.6V10.6L12 3.2z",
   // bubble.left.fill

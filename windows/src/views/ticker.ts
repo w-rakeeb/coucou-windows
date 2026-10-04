@@ -44,7 +44,7 @@ function makeRow(): Row {
     "div",
     { class: "ticker-row" },
     h("span", { class: "tick-icon", style: "position:relative" }, chevron, check),
-    h("span", { style: "position:relative;flex:1 1 auto;min-width:0" }, shimmer, dim),
+    h("span", { style: "position:relative;flex:1 1 auto;min-width:0;height:22px" }, shimmer, dim),
   );
   return { el, chevron, check, shimmer, dim, text: "" };
 }
@@ -78,6 +78,8 @@ export class Ticker {
   private queue: string[] = [];
   private startMs: number | null = null;
   private displayIndex = -1;
+  private taskKey = "";
+  private revision = -1;
 
   constructor() {
     this.el = h("div", { class: "ticker" }, this.a.el, this.b.el, this.c.el);
@@ -98,9 +100,14 @@ export class Ticker {
   sync(task: AgentTask | null) {
     const steps = task && task.steps.length > 0 ? task.steps : ["…"];
     const idx = task ? Math.min(task.stepIndex, steps.length - 1) : -1;
+    const key = `${task?.id ?? ""}:${task?.turnId ?? ""}`;
+    const revision = task?.stepRevision ?? idx;
 
     // First render: drop straight into place, no animation.
-    if (this.displayIndex < 0) {
+    if (this.displayIndex < 0 || key !== this.taskKey) {
+      this.taskKey = key;
+      this.revision = revision;
+      this.queue = []; this.startMs = null;
       this.displayIndex = idx;
       setText(this.a, idx > 0 ? steps[idx - 1] : "…");
       setText(this.b, steps[Math.max(idx, 0)]);
@@ -113,13 +120,16 @@ export class Ticker {
       this.queue = [];
       this.startMs = null;
       this.displayIndex = idx;
+      this.revision = revision;
       setText(this.a, idx > 0 ? steps[idx - 1] : "…");
       setText(this.b, steps[Math.max(idx, 0)]);
       this.rest();
       return;
     }
 
-    for (let i = this.displayIndex + 1; i <= idx; i++) this.queue.push(steps[i]);
+    const count = Math.min(steps.length, Math.max(0, revision - this.revision));
+    this.queue.push(...steps.slice(steps.length - count).slice(0, count));
+    this.revision = revision;
     this.displayIndex = idx;
     if (this.queue.length > MAX_QUEUE) {
       this.queue = this.queue.slice(-MAX_QUEUE);
