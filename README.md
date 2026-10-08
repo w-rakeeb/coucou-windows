@@ -6,7 +6,7 @@ A floating status island for Codex and Claude Code on Windows, with session acti
 
 This is a community source fork of [Louis-CFM/coucou](https://github.com/Louis-CFM/coucou), maintained by [Ra Kib](https://github.com/w-rakeeb). It is independent of the original project.
 
-The `windows-enhancements` branch contains our Windows changes, based on upstream commit [`835421c`](https://github.com/Louis-CFM/coucou/commit/835421c7fff260f0f0be48927591b96bfad81cad). The fork's `main` branch preserves the newer upstream snapshot. The macOS sources from our base are retained; the changes described here focus on Windows.
+The `windows-enhancements` branch combines our Windows changes with upstream Windows 0.2.0, through [`2a60e6b`](https://github.com/Louis-CFM/coucou/commit/2a60e6b). The original project remains credited and its licenses are retained.
 
 ## Features
 
@@ -19,9 +19,14 @@ The `windows-enhancements` branch contains our Windows changes, based on upstrea
 | Appearance | Pet/accent color and separate size sliders for minimized and expanded views. |
 | Window controls | Monitor selection, dragging, saved position, always-on-top, position lock, and light corner assist. |
 | Visibility | Timed minimize/hide, keep-open, keep-minimized, startup, and an optional hidden tray icon. |
-| API chat | Claude, OpenAI, and OpenRouter providers, editable model IDs, and securely saved API keys. |
+| API chat | Claude, OpenAI, Google AI, OpenRouter, Ollama, LM Studio, and custom compatible servers, with a model picker and streaming replies. |
 | File attachments | Native file selection and drag/drop for supported documents, images, text, and code. |
 | Settings | Modern pages or Classic layout, with concise labels and narrower windows. |
+| More coding agents | Upstream integrations for Cursor, Gemini CLI, Antigravity, Copilot, Muse, OpenCode, Amp, Hermes, and Claude Desktop. |
+| Live edits and questions | File diffs, finished-answer ticker, supported question cards, and optional Claude/Codex plan pills. |
+| Desktop pet | Drag Mochi onto the desktop and choose seasonal outfits in the wardrobe. |
+| Shortcuts and recaps | Configurable shortcuts, weekly recaps and history, and GitHub activity views. |
+| Languages | Ten interface languages, including Bengali, with RTL support. |
 
 ## Build and run
 
@@ -67,6 +72,7 @@ See [the Windows guide](windows/README.md) for configuration, behavior, and trou
 cd windows
 npm ci
 npm run build
+npm test
 npm run test:codex
 cargo test --locked --workspace --lib --bins
 npm run tauri -- build --no-bundle

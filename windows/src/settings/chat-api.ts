@@ -1,3 +1,4 @@
+import { t } from "../i18n/i18n";
 import { Bridge } from "../core/bridge";
 import type { Settings } from "../core/state";
 import { h, clear } from "../views/dom";
@@ -6,6 +7,7 @@ export function chatApiV2(settings: Settings, present: Record<string, boolean>, 
   const providers = [
     { id: "anthropic", name: "Claude", key: "anthropic-api-key", model: "model", placeholder: "sk-ant-…" },
     { id: "openai", name: "OpenAI", key: "openai-api-key", model: "openaiModel", placeholder: "sk-…" },
+    { id: "google", name: "Google AI", key: "google-api-key", model: "googleModel", placeholder: "AIza…" },
     { id: "openrouter", name: "OpenRouter", key: "openrouter-api-key", model: "openrouterModel", placeholder: "sk-or-…" },
   ] as const;
   const tabs = h("div", { class: "provider-tabs", role: "group", "aria-label": "Chat provider" });
@@ -16,13 +18,13 @@ export function chatApiV2(settings: Settings, present: Record<string, boolean>, 
     const spec = providers.find(p => p.id === settings.chatProvider) ?? providers[0];
     clear(body);
     const ready = !!present[spec.key];
-    const model = h("input", { type: "text", class: "model-field", "aria-label": spec.name + " model", value: settings[spec.model], spellcheck: "false" }) as HTMLInputElement;
-    model.addEventListener("change", () => { const value = model.value.trim(); if (value) { settings[spec.model] = value; void save(); } else model.value = settings[spec.model]; });
-    const modelRow = h("div", { class: "field-stack" }, h("label", { text: "Model ID", for: "chat-model" }), model);
+    const model = h("input", { type: "text", class: "model-field", "aria-label": spec.name + " model", value: spec.id === "anthropic" ? settings.model : settings.chatModels[spec.id] ?? (spec.id === "openai" ? settings.openaiModel : spec.id === "openrouter" ? settings.openrouterModel : ""), spellcheck: "false" }) as HTMLInputElement;
+    model.addEventListener("change", () => { const value = model.value.trim(); if (value) { if (spec.id === "anthropic") settings.model = value; else { settings.chatModels[spec.id] = value; if(spec.id === "openai") settings.openaiModel=value; if(spec.id === "openrouter") settings.openrouterModel=value; } void save(); } });
+    const modelRow = h("div", { class: "field-stack" }, h("label", { text: t("Model ID"), for: "chat-model" }), model);
     model.id = "chat-model";
     const status = h("div", { class: "credential-status" }, h("span", { text: ready ? "Key saved" : "No API key" }));
     const field = h("input", { type: "password", "aria-label": spec.name + " API key", placeholder: spec.placeholder, autocomplete: "off", spellcheck: "false" }) as HTMLInputElement;
-    const saveKey = h("button", { class: "primary", text: "Save key" }) as HTMLButtonElement;
+    const saveKey = h("button", { class: "primary", text: t("Save key") }) as HTMLButtonElement;
     saveKey.disabled = true;
     field.addEventListener("input", () => { saveKey.disabled = !field.value.trim(); });
     const feedback = h("div", { class: "key-feedback", role: "status", "aria-live": "polite" });
@@ -31,7 +33,7 @@ export function chatApiV2(settings: Settings, present: Record<string, boolean>, 
     const remove = h("button", { class: "quiet-danger", text: "Remove key" });
     saveKey.addEventListener("click", async () => {
       const key = field.value.trim(); if (!key) return;
-      saveKey.disabled = true; feedback.textContent = "Saving…";
+      saveKey.disabled = true; feedback.textContent = t("Saving…");
       try { await Bridge.secretSet(spec.key, key); field.value = ""; present[spec.key] = true; draw(); (body.querySelector('[role="status"]') as HTMLElement).textContent = "Key saved."; }
       catch { field.value = ""; feedback.textContent = "Could not save the key."; }
     });

@@ -26,7 +26,40 @@ pub fn inbox_dir() -> PathBuf {
     settings::local_dir().join("inbox")
 }
 
+const DROP_VALID_FOR: Duration = Duration::from_secs(120);
+const DROP_MAX_PENDING: usize = 64;
+
+static DROPPED: std::sync::Mutex<Vec<(String, std::time::Instant)>> = std::sync::Mutex::new(Vec::new());
+
+/// Records paths that came from a real drop.
+pub fn allow_dropped<I: IntoIterator<Item = String>>(paths: I) {
+    let mut list = DROPPED.lock().unwrap_or_else(|e| e.into_inner());
+    let now = std::time::Instant::now();
+    list.retain(|(_, at)| now.duration_since(*at) < DROP_VALID_FOR);
+    for p in paths {
+        list.push((p, now));
+    }
+    let excess = list.len().saturating_sub(DROP_MAX_PENDING);
+    list.drain(..excess);
+}
+
+/// True (once) when `path` was delivered by a drop in the last couple of minutes.
+fn take_dropped(path: &str) -> bool {
+    let mut list = DROPPED.lock().unwrap_or_else(|e| e.into_inner());
+    let now = std::time::Instant::now();
+    list.retain(|(_, at)| now.duration_since(*at) < DROP_VALID_FOR);
+    match list.iter().position(|(p, _)| p == path) {
+        Some(i) => {
+            list.remove(i);
+            true
+        }
+        None => false,
+    }
+}
+
+
 pub fn ingest(source: &str) -> Result<DroppedFile, String> {
+    if !take_dropped(source) { return Err(crate::i18n::t("Only files dropped on the island can be added.")); }
     let src = Path::new(source);
     let meta = std::fs::metadata(src).map_err(|e| format!("cannot read {source}: {e}"))?;
     if meta.is_dir() {
@@ -116,12 +149,15 @@ mod tests {
         let source = tmp.join("note.txt");
         std::fs::write(&source, b"hello").unwrap();
 
+        assert!(ingest(source.to_str().unwrap()).is_err());
+        allow_dropped([source.to_string_lossy().to_string()]);
         let first = ingest(source.to_str().unwrap()).unwrap();
         assert_eq!(first.name, "note.txt");
         assert_eq!(std::fs::read(&first.path).unwrap(), b"hello");
 
         // A second drop of the same name must not clobber the first copy.
         std::fs::write(&source, b"second").unwrap();
+        allow_dropped([source.to_string_lossy().to_string()]);
         let second = ingest(source.to_str().unwrap()).unwrap();
         assert_ne!(first.path, second.path);
         assert_eq!(std::fs::read(&first.path).unwrap(), b"hello");
@@ -140,6 +176,7 @@ mod tests {
             .unwrap()
             .set_modified(long_ago)
             .unwrap();
+        allow_dropped([old_source.to_string_lossy().to_string()]);
         let aged = ingest(old_source.to_str().unwrap()).unwrap();
         assert!(
             Path::new(&aged.path).exists(),

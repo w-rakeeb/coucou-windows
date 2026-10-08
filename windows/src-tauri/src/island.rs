@@ -135,14 +135,14 @@ impl PollGate {
         self.cv.notify_all();
     }
 
-    fn wait_until_active(&self) {
+    pub(crate) fn wait_until_active(&self) {
         let mut guard = self.active.lock().unwrap();
         while !*guard {
             guard = self.cv.wait(guard).unwrap();
         }
     }
 
-    fn is_active(&self) -> bool {
+    pub(crate) fn is_active(&self) -> bool {
         *self.active.lock().unwrap()
     }
 }
@@ -527,4 +527,10 @@ pub fn set_ignore_cursor(app: &AppHandle, ignore: bool) {
     if let Some(win) = window(app) {
         let _ = win.set_ignore_cursor_events(ignore);
     }
+}
+
+/// Re-arm click-through after changing the native window envelope.
+pub fn refresh_click_through(app: &AppHandle, gate: &PollGate) {
+    gate.forget_ignore_state();
+    if let Some(win) = window(app) { let _ = win.set_ignore_cursor_events(false); }
 }

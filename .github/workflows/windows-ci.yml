@@ -38,6 +38,8 @@ jobs:
         run: npm ci
       - name: Frontend build
         run: npm run build
+      - name: Upstream feature checks
+        run: npm test
       - name: Codex behavior checks
         run: npm run test:codex
       - name: Rust tests

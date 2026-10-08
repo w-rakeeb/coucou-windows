@@ -8,7 +8,7 @@ Community source fork: [w-rakeeb/coucou-windows](https://github.com/w-rakeeb/cou
 
 **Mochi doesn't get a notch on a PC — so it lives at the top of your screen instead.**
 
-Approve Claude Code permissions, watch your session work, drop a file, chat with Claude, keep an eye on your services — without leaving what you're doing.
+Watch Codex and other coding sessions, review supported permissions, drop a file, chat with your selected provider, and follow your services — without leaving what you're doing.
 
 ![Windows 10/11](https://img.shields.io/badge/Windows-10%2F11-0078D4?logo=windows)
 ![Tauri 2](https://img.shields.io/badge/Tauri-2-FFC131?logo=tauri&logoColor=black)
@@ -23,13 +23,7 @@ Approve Claude Code permissions, watch your session work, drop a file, chat with
 
 ## Install
 
-The downloadable installer is **temporarily unavailable**. Microsoft Defender
-wrongly flags the unsigned installer as malware (`Trojan:Win32/Wacatac.H!ml`, a
-machine-learning false positive). A report is under review at Microsoft, and the
-installer will be published again once it is cleared and code-signed.
-
-Until then, [build it yourself](#build-it-yourself): it takes a few minutes and
-installs for the current user only — no admin prompt.
+This fork publishes source. Follow [Build it yourself](#build-it-yourself) below. For the original project's Windows installer, use its [official releases](https://github.com/Louis-CFM/coucou/releases/tag/windows-v0.2.0).
 
 ## Using it
 

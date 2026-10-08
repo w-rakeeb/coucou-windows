@@ -100,7 +100,7 @@ pub fn status() -> HookStatus {
         }).unwrap_or(false))
     }).unwrap_or(false);
     let relay = settings::hook_exe_path();
-    HookStatus { installed, settings_path: p.display().to_string(), hook_path: relay.display().to_string(), hook_ready: relay.is_file() }
+    HookStatus { plan_relay_installed: false, installed, settings_path: p.display().to_string(), hook_path: relay.display().to_string(), hook_ready: relay.is_file() }
 }
 
 pub fn preview(install: bool) -> Result<HookPreview, String> {
