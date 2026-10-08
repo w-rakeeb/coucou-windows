@@ -522,7 +522,7 @@ export function handleHook(island: Island, payload: HookPayload) {
       // taken over and the card would be lying.
       pendingTimeout = window.setTimeout(() => {
         pendingTimeout = null;
-        dropPendingCard(island);
+        if (State.pendingApproval?.requestId === requestId) dropPendingCard(island);
       }, 110_000);
       break;
     }

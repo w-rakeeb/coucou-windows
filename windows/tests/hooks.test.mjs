@@ -301,6 +301,16 @@ test("an agent's card comes up at once when its pill has the focus", () => {
   assert.deepEqual(asked, ["alert:approval"]);
 });
 
+test("an answered Claude request cannot expire a newer Codex approval", () => {
+  hook({ hook_event_name: "PermissionRequest", request_id: "old", session_id: "claude-old", tool_name: "Bash" });
+  State.endApproval();
+  mock.timers.tick(100_000);
+  hook({ provider: "codex", hook_event_name: "PermissionRequest", request_id: "new", session_id: "codex-new", tool_name: "Bash" });
+  assert.equal(State.pendingApproval?.requestId, "new");
+  mock.timers.tick(10_000);
+  assert.equal(State.pendingApproval?.requestId, "new");
+});
+
 test("only Claude Code's questions become a question card", () => {
   hook({
     hook_event_name: "PermissionRequest", request_id: "r1", session_id: "s1", coucou_agent: "codex",
