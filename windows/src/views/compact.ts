@@ -23,9 +23,9 @@ export function buildCompact(expand: () => void) {
     const first = tasks[0];
     const provider = first?.source === "codex" ? "Codex" : "Claude";
     activity.dataset.state = first?.state ?? "idle";
-    activity.textContent = tasks.length > 1 ? `${tasks.length} tasks running` : !first ? t("Ready") :
-      first.state === "approval" ? `${provider} · Approval` : first.state === "question" ? `${provider} · Question` :
-      first.state === "ratelimit" ? `${provider} waiting` : first.state === "thinking" ? `${provider} thinking` : `${provider} working`;
+    activity.textContent = tasks.length > 1 ? `${tasks.length} Tasks Running` : !first ? t("Ready") :
+      first.state === "approval" ? `${provider} Needs Approval` : first.state === "question" ? `${provider} Needs An Answer` :
+      first.state === "ratelimit" ? `${provider} Is Waiting` : first.state === "thinking" ? `${provider} Is Thinking` : `${provider} Is Working`;
     activity.title = first ? tasks.map(task => task.name).join(" · ") : "No active coding session";
   }};
 }
