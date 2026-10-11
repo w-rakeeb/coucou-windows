@@ -6,10 +6,11 @@ Merged upstream Windows/Linux 0.3.0 and 0.4.0 through `e1b2cfd` while retaining 
 
 - Optional hover opening, with keep-open, keep-minimized and pinned views respected.
 - Custom sound files, reload controls, individual pill colors and new keyboard shortcuts.
-- An Android phone page in Modern and Classic settings, with optional pairing and separate permission controls. The link is off by default; the upstream signed Android APK is still forthcoming.
+- An Android phone page in Modern and Classic settings, with optional pairing and separate permission controls. The link is off by default; the official [Android APK](https://github.com/Louis-CFM/coucou/releases/tag/android-v0.1.0) is available.
 - Live Codex desktop limits are shared with a paired phone when allowance sharing is enabled.
 - Individual Codex colors reach every session pet; the global accent remains available.
 - A new prompt or resumed tool activity replaces that chat's previous finished card.
+- Minimized activity uses a compact status pill with a dot and shorter labels.
 
 Upstream macOS voice features remain macOS-only.
 

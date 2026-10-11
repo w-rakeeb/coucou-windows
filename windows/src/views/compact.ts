@@ -1,4 +1,5 @@
 import { State } from "../core/state";
+import { t } from "../i18n/i18n";
 import { h } from "./dom";
 import { remaining, resetText, windowLabel, shortReset } from "../island/codex-info";
 
@@ -21,9 +22,10 @@ export function buildCompact(expand: () => void) {
     const tasks = State.activeChats;
     const first = tasks[0];
     const provider = first?.source === "codex" ? "Codex" : "Claude";
-    activity.textContent = tasks.length > 1 ? `${tasks.length} tasks running` : !first ? "No task running" :
-      first.state === "approval" ? `${provider} needs approval` : first.state === "question" ? `${provider} needs an answer` :
-      first.state === "ratelimit" ? `${provider} is waiting` : first.state === "thinking" ? `${provider} is thinking` : `${provider} is working`;
+    activity.dataset.state = first?.state ?? "idle";
+    activity.textContent = tasks.length > 1 ? `${tasks.length} tasks running` : !first ? t("Ready") :
+      first.state === "approval" ? `${provider} · Approval` : first.state === "question" ? `${provider} · Question` :
+      first.state === "ratelimit" ? `${provider} waiting` : first.state === "thinking" ? `${provider} thinking` : `${provider} working`;
     activity.title = first ? tasks.map(task => task.name).join(" · ") : "No active coding session";
   }};
 }

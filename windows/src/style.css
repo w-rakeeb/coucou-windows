@@ -764,7 +764,12 @@ body {
 #compact-info.on #compact-limits { cursor: pointer; pointer-events: auto; }
 #compact-info.both #compact-limits { top: 2px; }
 #compact-info.resets #compact-limits { font-size: 8px; }
-#compact-info.both #compact-activity { top: 16px; font-size: 8px; color: #92999e; }
+#compact-activity { left: 50%; width: max-content; max-width: 100%; transform: translateX(-50%); display: inline-flex; align-items: center; justify-content: center; gap: 4px; height: 12px; padding: 0 6px; border-radius: 999px; background: #ffffff07; color: #a4aaae; font: 500 7.5px/12px var(--font); letter-spacing: .015em; overflow: hidden; text-overflow: ellipsis; }
+#compact-activity::before { content: ""; flex: 0 0 3px; width: 3px; height: 3px; border-radius: 50%; background: #72797d; }
+#compact-activity:not([data-state="idle"]) { color: #c5cdca; }
+#compact-activity:not([data-state="idle"])::before { background: var(--accent, #a8d8cc); }
+#compact-activity:is([data-state="approval"], [data-state="question"], [data-state="ratelimit"])::before { background: #e8bc78; }
+#compact-info.both #compact-activity { top: 17px; }
 #compact-limits[hidden], #compact-activity[hidden] { display: none; }
 .header-actions .codex-limits { font: 500 10px var(--font); color: #fff; padding: 3px 8px; background: #ffffff08; border-radius: 7px; white-space: nowrap; cursor: pointer; }
 #header { cursor: grab; }
