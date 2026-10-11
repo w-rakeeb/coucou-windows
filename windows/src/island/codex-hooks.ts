@@ -105,6 +105,13 @@ export function handleHook(island: Island, payload: HookPayload) {
     }
   }
   const focused = State.focusId === id;
+  // A completion card belongs to the focused session's previous turn.
+  // Starting work replaces it even when the expanded view is kept open.
+  if (focused && State.view === "finished" && !State.pendingApproval &&
+      ["UserPromptSubmit", "PreToolUse", "PostToolUse", "PostToolUseFailure"].includes(name)) {
+    if (!State.isPinned) island.dropPin();
+    island.setView("overview");
+  }
   const surface = (view: Parameters<Island["alert"]>[0], alert: boolean) => {
     if (State.pendingApproval && State.pendingApproval.taskId !== id) return;
     if (State.mode === "expanded") { if (alert) island.setView(view); }

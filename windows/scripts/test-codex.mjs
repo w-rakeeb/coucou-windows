@@ -47,7 +47,11 @@ try {
 
   event('codex', 'codex-1', 'Stop', { turn_id: 'turn-1', message: 'Finished one' });
   assert.equal(first.state, 'finished');
+  State.setFocus(first.id); State.mode = 'expanded'; State.view = 'finished';
+  State.settings.keepExpanded = true;
   event('codex', 'codex-1', 'UserPromptSubmit', { turn_id: 'turn-2', prompt: 'New task' });
+  assert.equal(State.view, 'overview');
+  assert.equal(State.settings.keepExpanded, true);
   assert.deepEqual(first.activity, []);
   assert(second.activity.at(-1).detail.includes('patch two'));
   console.log('PASS: multiline activity fields survive and new turns do not clear another session');
@@ -56,6 +60,13 @@ try {
   event('codex', 'codex-1', 'Stop', { turn_id: 'turn-1' });
   assert.equal(first.state, 'thinking');
   console.log('PASS: old completion events/timers cannot finish a newer turn');
+  State.view = 'finished';
+  event('codex', 'codex-2', 'PreToolUse', { tool_name: 'Read' });
+  assert.equal(State.view, 'finished', 'another chat must not dismiss this completion');
+  event('codex', 'codex-1', 'PreToolUse', { tool_name: 'Read' });
+  assert.equal(State.view, 'overview', 'tool activity resumes even without a prompt hook');
+  State.updateTask(first.id, 'thinking');
+
 
   event('codex', 'codex-2', 'PermissionRequest', { request_id: 'request-1', tool_name: 'Bash', tool_input: { command: 'echo synthetic test' } });
   assert.equal(State.focusId, second.id);
