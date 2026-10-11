@@ -12,12 +12,15 @@ import {
   recordPress, type Binding,
 } from "../core/shortcuts";
 import { DEFAULT_SETTINGS, type Settings } from "../core/state";
+import { SOUND_NAMES } from "../core/sound";
 import {
   MAX_DECLARED, PILL_CATEGORIES, availablePills, chooseMainPill, isComingSoon, mainPillChoices,
   sanitizeDeclared, toggleDeclared, type PillDefinition,
 } from "../core/pills";
 import { h, clear } from "../views/dom";
 import { agentsSection } from "./agents";
+import { phoneSection } from "./phone";
+import { colorDot } from "./colors";
 import { renderDiff, statusDot } from "./parts";
 import {
   LANGUAGES, N_, isRtl, onLanguageChange, resolveLanguage, setLanguage, systemLanguages, t, tn,
@@ -36,6 +39,12 @@ const root = document.getElementById("settings-root")!;
 
 async function save() {
   await Bridge.saveSettings(settings);
+}
+
+/** A colour was picked for a pill's Mochi (see ./colors.ts): the island follows. */
+function pickColor(next: Record<string, string>) {
+  settings.pillColors = next;
+  void save();
 }
 
 // ── Reusable bits ─────────────────────────────────────────────────────────────
@@ -234,6 +243,7 @@ function claudeSection(status: HookStatus): HTMLElement {
  */
 const PLAN_SETTINGS_TEXT = {
   get claude() { return t("Shows your Claude plan usage (5-hour and weekly limits) in the island's header. Coucou adds a status line relay in ~/.claude/settings.json. If you already have a status line, it keeps working as before. Pro and Max plans only."); },
+  get claudeCli() { return t("The numbers come from the Claude Code command-line tool. The Claude desktop app does not report them, so the gauge stays empty if you only use the desktop app."); },
   get showClaude() { return t("Show in notch"); },
   get codex() { return t("Shows your Codex plan usage (weekly limit and free resets left) in the island's header. Coucou asks the Codex CLI (codex app-server) when the pill shows; nothing is installed. Codex must be signed in with ChatGPT."); },
   get showCodex() { return t("Show Codex plan in the notch"); },
@@ -279,6 +289,7 @@ function planSection(status: HookStatus): HTMLElement {
         class: "hint",
         text: PLAN_SETTINGS_TEXT.claude,
       }),
+      h("div", { class: "hint", text: PLAN_SETTINGS_TEXT.claudeCli }),
       h("div", { class: "row" }, h("label", { text: PLAN_SETTINGS_TEXT.showClaude }), sw),
       h("div", { class: "row" },
         h("label", { text: t("Relay") }),
@@ -429,7 +440,7 @@ function activePillsSection(connected: Record<string, boolean>): HTMLElement {
     const on = settings.activeIntegrations.includes(def.id);
     const full = !isMain && !on && settings.activeIntegrations.length >= MAX_ACTIVE;
     const el = h("div", { class: full ? "pill-row full" : "pill-row" },
-      h("i", { class: "dot", style: `background:${def.color};width:10px;height:10px` }),
+      colorDot(def, "width:10px;height:10px", () => settings.pillColors, pickColor),
       h("span", { class: "name", text: def.name }),
     );
     if (isMain) {
@@ -769,6 +780,8 @@ const INTEGRATIONS: IntegrationDef[] = [
     fields: [{ key: "notion-api-key", label: N_("Integration token"), placeholder: "ntn_…", secret: true }] },
   { id: "integration_calcom", name: "Cal.com", color: "#C9956A",
     fields: [{ key: "calcom-api-key", label: N_("API key"), placeholder: "cal_…", secret: true }] },
+  // Nothing to enter: Spotify is read over D-Bus (Linux only, see core/pills.ts).
+  { id: "integration_spotify", name: "Spotify", color: "#1DB954", fields: [] },
 ];
 
 const MAX_ACTIVE = MAX_DECLARED;
@@ -791,7 +804,8 @@ function integrationsSection(present: Record<string, boolean>): HTMLElement {
   }
   declaredViews.push(updateNote);
 
-  for (const def of INTEGRATIONS) {
+  const offered = new Set(availablePills().map((p) => p.id));
+  for (const def of INTEGRATIONS.filter((d) => offered.has(d.id))) {
     const active = settings.activeIntegrations.includes(def.id);
     const sw = h("button", { class: active ? "switch on" : "switch" });
     sw.addEventListener("click", () => {
@@ -838,12 +852,20 @@ function integrationsSection(present: Record<string, boolean>): HTMLElement {
     }
 
     if (def.hint) rows.append(h("div", { class: "hint", text: t(def.hint) }));
+    if (def.id === "integration_spotify") {
+      // As on the Mac's row: said only when there is no Spotify to launch.
+      const hint = h("div", { class: "hint", style: "padding-top:5px" });
+      rows.append(hint);
+      void Bridge.spotifyInstalled().then((ok) => {
+        hint.textContent = ok === false ? t("Not installed") : "";
+      });
+    }
 
     list.append(
       h("div", { style: "display:flex;gap:12px;align-items:flex-start" },
         h("div", { style: "display:flex;align-items:center;gap:8px;min-width:132px;padding-top:4px" },
           sw,
-          h("i", { class: "dot", style: `background:${def.color}` }),
+          colorDot(def, "", () => settings.pillColors, pickColor),
           h("span", { style: "font-size:12.5px", text: def.name }),
         ),
         rows,
@@ -876,7 +898,7 @@ function generalSection(monitors: {id:string;label:string;width:number;height:nu
   };
   const petColor = h("input", { type: "color", "aria-label": "Pet color", value: settings.petColor || "#a8d8cc" }) as HTMLInputElement;
   petColor.addEventListener("input", () => { settings.petColor = petColor.value; void save(); });
-  const resetColor = h("button", { text: "Default", title: "Restore the original agent colors", onclick: () => { settings.petColor = ""; petColor.value = "#a8d8cc"; void save(); } });
+  const resetColor = h("button", { text: t("Default"), title: "Restore the original agent colors", onclick: () => { settings.petColor = ""; petColor.value = "#a8d8cc"; void save(); } });
   const volume = h("input", {
     type: "range", min: "0", max: "0.2", step: "0.005",
     value: String(settings.soundVolume),
@@ -884,6 +906,20 @@ function generalSection(monitors: {id:string;label:string;width:number;height:nu
   volume.addEventListener("input", () => {
     settings.soundVolume = Number(volume.value);
     void save();
+  });
+
+  // Your own sounds: the folder, a reload, and how many are replaced.
+  const customCount = h("span", { class: "hint" });
+  const countCustom = () =>
+    void Bridge.customSounds(SOUND_NAMES).then((own) => {
+      const n = own?.length ?? 0;
+      customCount.textContent = n > 0 ? t("{0} custom", { 0: n }) : "";
+    });
+  countCustom();
+  const soundsFolder = h("button", { text: t("Open sounds folder"), onclick: () => void Bridge.revealSoundsFolder() });
+  const reloadSounds = h("button", {
+    text: t("Reload sounds"),
+    onclick: () => void Bridge.reloadSounds().then(() => window.setTimeout(countCustom, 300)),
   });
 
   const autoClose = h("input", {
@@ -965,6 +1001,13 @@ function generalSection(monitors: {id:string;label:string;width:number;height:nu
       boundToggle("soundEnabled", (v) => { settings.soundEnabled = v; void save(); }),
       volume,
     ),
+    h("div", { class: "row custom-sounds" }, soundsFolder, reloadSounds, customCount),
+    h("div", { class: "hint custom-sounds", text: t("Drop a file named like one of Mochi's sounds (finish.wav, approval.mp3, greet.m4a…) in the sounds folder to replace it, then Reload.") }),
+    h("div", { class: "row" },
+      h("label", { text: t("Open on hover") }),
+      toggle(settings.openOnHover, (v) => { settings.openOnHover = v; void save(); }),
+    ),
+    h("div", { class: "hint", text: t("Hovering the island opens it; it folds again shortly after the pointer leaves. Click inside to keep it open.") }),
     h("div", { class: "row" },
       h("label", { text: "Expanded view" }),
       fullMode,
@@ -1039,6 +1082,17 @@ const SHORTCUTS_UI = {
     return t("Your Wayland desktop doesn't let apps listen for keys outside their own windows. Add the shortcuts in your system's keyboard settings instead, with these commands:");
   },
   get noDisplay() { return t("No display server was found, so global shortcuts are off."); },
+  get portalPending() {
+    return t("Asking your desktop to register the shortcuts. It may show its own window to confirm them.");
+  },
+  get portalActive() {
+    return t("These shortcuts are registered with your desktop. It may ask you to confirm them or to pick other keys; when it says which keys it uses, they show next to each shortcut.");
+  },
+  get portalFallback() {
+    return t("If one doesn't work, you can also add it in your system's keyboard settings with these commands:");
+  },
+  desktopKeys: (keys: string) => t("Desktop: {keys}", { keys }),
+  get refused() { return t("Not set by your desktop"); },
 };
 
 function shortcutsSection(initial: ShortcutsReport | null): HTMLElement {
@@ -1063,6 +1117,9 @@ function shortcutsSection(initial: ShortcutsReport | null): HTMLElement {
       case "invalid": return h("span", { class: "tag err", text: SHORTCUTS_UI.invalid });
       case "typesCharacter": return h("span", { class: "tag warn", text: SHORTCUTS_UI.types(st.typed ?? "?") });
       case "unsupported": return h("span", { class: "tag", text: SHORTCUTS_UI.unavailable });
+      case "refused": return h("span", { class: "tag warn", text: SHORTCUTS_UI.refused });
+      // Wayland: the desktop may run it on other keys than the ones asked for.
+      case "active": return st.trigger ? h("span", { class: "tag", text: SHORTCUTS_UI.desktopKeys(st.trigger) }) : null;
       default: return null;
     }
   }
@@ -1145,12 +1202,27 @@ function shortcutsSection(initial: ShortcutsReport | null): HTMLElement {
     }
 
     clear(blockedNote);
-    if (report?.blocked === "wayland") {
-      const commands = h("div", { class: "diff" });
+    const commands = (command: string) => {
+      const list = h("div", { class: "diff" });
       for (const d of SHORTCUTS) {
-        if (d.ported) commands.append(h("div", { class: "ctx", text: `${report.command} ${d.id}` }));
+        if (d.ported) list.append(h("div", { class: "ctx", text: `${command} ${d.id}` }));
       }
-      blockedNote.append(h("div", { class: "notice warn", text: SHORTCUTS_UI.wayland }), commands);
+      return list;
+    };
+    if (report?.portal) {
+      // Wayland, through the desktop's GlobalShortcuts portal; the commands
+      // stay as a way around a shortcut the desktop didn't take.
+      const active = report.portal === "active";
+      blockedNote.append(
+        h("div", {
+          class: active ? "notice ok" : "notice",
+          text: active ? SHORTCUTS_UI.portalActive : SHORTCUTS_UI.portalPending,
+        }),
+        h("div", { class: "hint", text: SHORTCUTS_UI.portalFallback }),
+        commands(report.command),
+      );
+    } else if (report?.blocked === "wayland") {
+      blockedNote.append(h("div", { class: "notice warn", text: SHORTCUTS_UI.wayland }), commands(report.command));
     } else if (report?.blocked) {
       blockedNote.append(h("div", { class: "notice warn", text: SHORTCUTS_UI.noDisplay }));
     }
@@ -1374,15 +1446,15 @@ async function render() {
   general.append(...recapRows(), languageRow());
   const hookSections = [forkHooksSection(codexStatus, true), claudeSection(status), agentsSection(agents?.filter(a => a.id !== "codex") ?? null)];
   if (settings.settingsInterface === "v1") {
-    root.append(h("div",{class:"classic-heading"},h("h1",{},h("span",{text:"Coucou"}),h("span",{class:"version",text:version})),switcher),general,...hookSections,planSection(status),apiSection(hasKey),chatProvidersSection(chatKeys,keyChanged),localSection(customKey),activePillsSection(connected),integrationsSection(present),shortcutsSection(shortcutReport));
+    root.append(h("div",{class:"classic-heading"},h("h1",{},h("span",{text:"Coucou"}),h("span",{class:"version",text:version})),switcher),general,...hookSections,planSection(status),apiSection(hasKey),chatProvidersSection(chatKeys,keyChanged),localSection(customKey),activePillsSection(connected),integrationsSection(present),phoneSection(settings.phoneLink ?? false,toggle,settings),shortcutsSection(shortcutReport));
   } else {
     const appearance=h("section",{}), behavior=h("section",{});
     const appearanceLabels=new Set(["Pet & accent","Minimized size","Expanded size","Expanded reset timer","Minimized limits","Minimized activity","Minimized reset timer",t("Sound")]);
     for(const child of Array.from(general.children).slice(1)) {
       const label=child.querySelector("label")?.textContent;
-      (label && appearanceLabels.has(label) ? appearance : behavior).append(child);
+      (child.classList.contains("custom-sounds") || label && appearanceLabels.has(label) ? appearance : behavior).append(child);
     }
-    root.append(settingsV2({appearance:[appearance],window:[behavior],chat:[chatApiV2(settings,{...chatKeys,"anthropic-api-key":hasKey},save),localSection(customKey)],connections:[activePillsSection(connected),integrationsSection(present)],agents:hookSections,usage:[planSection(status)],shortcuts:[shortcutsSection(shortcutReport)]},version,switcher));
+    root.append(settingsV2({appearance:[appearance],window:[behavior],chat:[chatApiV2(settings,{...chatKeys,"anthropic-api-key":hasKey},save),localSection(customKey)],connections:[activePillsSection(connected),integrationsSection(present)],agents:hookSections,phone:[phoneSection(settings.phoneLink ?? false,toggle,settings)],usage:[planSection(status)],shortcuts:[shortcutsSection(shortcutReport)]},version,switcher));
   }
 }
 

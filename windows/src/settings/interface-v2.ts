@@ -8,6 +8,7 @@ export function settingsV2(groups: Record<string, HTMLElement[]>, version: strin
     ["chat", t("Chat")],
     ["connections", "Connections"],
     ["agents", "Coding agents"],
+    ["phone", t("Android phone")],
     ["usage", t("Plan usage")],
     ["shortcuts", t("Shortcuts")],
   ];

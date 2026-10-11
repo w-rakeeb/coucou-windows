@@ -6,7 +6,7 @@ A floating status island for Codex and Claude Code on Windows, with session acti
 
 This is a community source fork of [Louis-CFM/coucou](https://github.com/Louis-CFM/coucou), maintained by [Ra Kib](https://github.com/w-rakeeb). It is independent of the original project.
 
-The `windows-enhancements` branch combines our Windows changes with upstream Windows 0.2.0, through [`2a60e6b`](https://github.com/Louis-CFM/coucou/commit/2a60e6b). The original project remains credited and its licenses are retained.
+The `windows-enhancements` branch combines our Windows changes with upstream Windows/Linux 0.4.0, through [`e1b2cfd`](https://github.com/Louis-CFM/coucou/commit/e1b2cfd). The original project remains credited and its licenses are retained.
 
 ## Features
 
@@ -26,6 +26,8 @@ The `windows-enhancements` branch combines our Windows changes with upstream Win
 | Live edits and questions | File diffs, finished-answer ticker, supported question cards, and optional Claude/Codex plan pills. |
 | Desktop pet | Drag Mochi onto the desktop and choose seasonal outfits in the wardrobe. |
 | Shortcuts and recaps | Configurable shortcuts, weekly recaps and history, and GitHub activity views. |
+| Hover and sounds | Optional hover opening and custom sound files. |
+| Android phone | Optional phone pairing, approvals and separately enabled chat, details and services. Off by default. |
 | Languages | Ten interface languages, including Bengali, with RTL support. |
 
 ## Build and run

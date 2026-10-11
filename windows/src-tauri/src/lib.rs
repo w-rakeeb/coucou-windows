@@ -22,13 +22,18 @@ mod local_chat;
 mod log;
 mod net;
 mod openai_compat;
+mod phone_link;
 mod pipe;
 mod platform;
+#[cfg(target_os = "linux")]
+mod portal;
 mod recap;
 mod secrets;
 mod session_window;
 mod settings;
 mod shortcuts;
+mod sounds;
+mod spotify;
 mod tray;
 #[cfg(windows)]
 mod webview_drop;
@@ -103,6 +108,17 @@ fn save_settings(app: AppHandle, shared: State<Shared>, mut settings: Settings) 
         let tray_changed = current.hide_tray_icon != settings.hide_tray_icon;
         let shortcuts_changed = current.shortcuts != settings.shortcuts;
         settings.desktop_mochi = current.desktop_mochi.clone();
+        // Same for the phone link: only its own commands turn it on or off.
+        settings.phone_link = current.phone_link;
+        settings.phone_chat = current.phone_chat;
+        settings.phone_details = current.phone_details;
+        settings.phone_answers = current.phone_answers;
+        settings.phone_diffs = current.phone_diffs;
+        settings.phone_usage = current.phone_usage;
+        settings.phone_services = current.phone_services.clone();
+        settings.phone_relay = current.phone_relay;
+        settings.phone_relay_url = current.phone_relay_url.clone();
+        settings.phone_chat_models = current.phone_chat_models.clone();
         *current = settings.clone();
         (screen_changed, autostart_changed, tray_changed, shortcuts_changed)
     };
@@ -129,6 +145,7 @@ fn save_settings(app: AppHandle, shared: State<Shared>, mut settings: Settings) 
         }
     }
     integrations::settings_saved(&app, &settings.active_integrations);
+    spotify::sync(&app, &settings.active_integrations);
     if shortcuts_changed {
         shortcuts::apply(&app, &settings.shortcuts);
     }
@@ -246,17 +263,33 @@ fn open_in_vscode(path: Option<String>) -> bool {
 }
 
 /// "Open terminal": brings forward the terminal or editor window the session
-/// runs in, when it was found (Windows, see session_window.rs); otherwise opens
-/// the folder in VS Code, as before.
+/// runs in, when it was found (see session_window.rs); otherwise opens the
+/// folder in VS Code, as before.
 #[tauri::command]
 fn open_session(session_id: Option<String>, path: Option<String>) -> bool {
-    if let Some(owner) = session_id.as_deref().and_then(session_window::lookup) {
-        let folder = path.as_deref().map(session_window::folder_name).unwrap_or_default();
-        if platform::focus_process_window(owner, folder) {
+    let Some(owners) = session_id.as_deref().and_then(session_window::lookup) else {
+        return open_in_vscode(path);
+    };
+    let folder = path.as_deref().map(session_window::folder_name).unwrap_or_default().to_string();
+    #[cfg(windows)]
+    {
+        if platform::focus_session_window(&owners, &folder) {
             return true;
         }
+        open_in_vscode(path)
     }
-    open_in_vscode(path)
+    // Linux asks the display server, KWin or the terminal, which can take a
+    // moment: never on the UI thread a sync command runs on. VS Code still
+    // opens when none of them could bring the window forward.
+    #[cfg(target_os = "linux")]
+    {
+        std::thread::spawn(move || {
+            if !platform::focus_session_window(&owners, &folder) {
+                open_in_vscode(path);
+            }
+        });
+        true
+    }
 }
 
 /// The Claude Desktop pill's target: the Claude app (Windows only — it has no
@@ -879,6 +912,32 @@ pub fn run() {
             set_paused,
             shortcuts_status,
             shortcuts_suspend,
+            phone_link::phone_link_status,
+            phone_link::phone_link_set_enabled,
+            phone_link::phone_link_pairing,
+            phone_link::phone_link_new_pairing,
+            phone_link::phone_link_publish,
+            phone_link::phone_link_publish_question,
+            phone_link::phone_link_publish_prefs,
+            phone_link::phone_answers_status,
+            phone_link::phone_answers_set_enabled,
+            phone_link::phone_diffs_status,
+            phone_link::phone_diffs_set_enabled,
+            phone_link::phone_link_send_diff,
+            phone_link::phone_usage_status,
+            phone_link::phone_usage_set_enabled,
+            phone_link::phone_relay_status,
+            phone_link::phone_relay_set,
+            phone_link::phone_relay_set_access,
+            phone_link::phone_link_publish_usage,
+            phone_link::phone_services_status,
+            phone_link::phone_services_set,
+            phone_link::phone_link_publish_services,
+            phone_link::phone_details_status,
+            phone_link::phone_details_set_enabled,
+            phone_link::phone_chat_status,
+            phone_link::phone_chat_set_enabled,
+            phone_link::phone_chat_set_models,
             recap::recap_history,
             recap::recap_prefs,
             recap::recap_set_enabled,
@@ -897,9 +956,18 @@ pub fn run() {
             desktop::desktop_mochi_fly_out,
             desktop::desktop_mochi_fly_home,
             desktop::desktop_mochi_set_asleep,
+            sounds::custom_sounds,
+            sounds::custom_sound,
+            sounds::reveal_sounds_folder,
+            sounds::reload_sounds,
+            spotify::spotify_refresh,
+            spotify::spotify_control,
+            spotify::spotify_open,
+            spotify::spotify_installed,
         ])
         .setup(move |app| {
             let handle = app.handle().clone();
+            app.manage(phone_link::PhoneLink::new(handle.clone()));
             tray::set_hidden(&handle, loaded.hide_tray_icon)?;
             // Before the island: see create_settings_window.
             create_settings_window(&handle);
@@ -933,12 +1001,20 @@ pub fn run() {
             log::line(format!("--- Coucou {} started ---", env!("CARGO_PKG_VERSION")));
             hooks::ensure_hook_exe(&handle);
             pipe::start(handle.clone());
+            phone_link::start_if_enabled(&handle);
             integrations::start(handle.clone());
+            spotify::sync(&handle, &loaded.active_integrations);
             shortcuts::apply(&handle, &loaded.shortcuts);
             Ok(())
         })
-        .run(tauri::generate_context!())
-        .expect("error while running Coucou");
+        .build(tauri::generate_context!())
+        .expect("error while building Coucou")
+        .run(|app, event| {
+            // Withdraw the phone link's announcement on the local network before the process ends.
+            if let tauri::RunEvent::Exit = event {
+                phone_link::stop_on_exit(app);
+            }
+        });
 }
 
 #[cfg(test)]

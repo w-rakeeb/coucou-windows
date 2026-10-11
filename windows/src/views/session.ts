@@ -1,5 +1,6 @@
 import { h, clear } from "./dom";
 import type { AgentTask, CodexSession } from "../core/state";
+import { t } from "../i18n/i18n";
 
 const exact = new Intl.NumberFormat(undefined, { maximumFractionDigits: 0 });
 export function tokenNumber(value: number | null | undefined): string {
@@ -17,7 +18,7 @@ function metric(label: string, value: number | null | undefined): HTMLElement {
 function activity(task: AgentTask | null): string {
   return ({ working: "Running a task", thinking: "Thinking", searching: "Searching",
     approval: "Needs approval", question: "Waiting for an answer", error: "Stopped on an error",
-    ratelimit: "Waiting for allowance", sleeping: "Paused" } as Record<string, string>)[task?.state ?? ""] ?? "Waiting for input";
+    ratelimit: "Waiting for allowance", sleeping: t("Paused") } as Record<string, string>)[task?.state ?? ""] ?? "Waiting for input";
 }
 export function renderSession(container: HTMLElement, task: AgentTask | null, session: CodexSession | null) {
   const scroll = container.scrollTop;

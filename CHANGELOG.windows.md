@@ -1,5 +1,18 @@
 # Windows fork changes
 
+## 0.4.0 — October 11, 2026
+
+Merged upstream Windows/Linux 0.3.0 and 0.4.0 through `e1b2cfd` while retaining the fork's settings, placement, scaling, visibility controls, Codex sessions, allowance and local token accounting.
+
+- Optional hover opening, with keep-open, keep-minimized and pinned views respected.
+- Custom sound files, reload controls, individual pill colors and new keyboard shortcuts.
+- An Android phone page in Modern and Classic settings, with optional pairing and separate permission controls. The link is off by default; the upstream signed Android APK is still forthcoming.
+- Live Codex desktop limits are shared with a paired phone when allowance sharing is enabled.
+- Individual Codex colors reach every session pet; the global accent remains available.
+- A new prompt or resumed tool activity replaces that chat's previous finished card.
+
+Upstream macOS voice features remain macOS-only.
+
 ## 0.1.2 — October 5, 2026
 
 Published the Windows customization work on the `windows-enhancements` branch.
