@@ -241,8 +241,7 @@ export class Island {
       },
       toggleKeepOpen: () => {
         State.settings.keepExpanded = !State.settings.keepExpanded;
-        this.fsm.applyVisibility(State.settings.keepExpanded, State.settings.keepMinimized, State.settings.minimizeHideInterval);
-        this.fsm.homeCollapseDueAt = State.settings.keepExpanded ? null : performance.now() + State.settings.autoCloseInterval * 1000;
+        this.applySettings();
         void Bridge.saveSettings(State.settings); State.notify();
       },
       toggleKeepMinimized: () => {
@@ -427,6 +426,7 @@ export class Island {
     if (State.mode !== "expanded") this.setMode("expanded");
     else this.animateGeometry(false);
     State.lastActivity = performance.now();
+    this.fsm.setCompletion(view === "finished" ? State.settings.completionCloseInterval : null);
     State.notify();
   }
 
@@ -436,6 +436,7 @@ export class Island {
     if (State.mode !== "expanded") {
       this.fsm.forceHome();
       State.view = view;
+      this.fsm.setCompletion(view === "finished" ? State.settings.completionCloseInterval : null);
       this.animateGeometry(false);
       State.notify();
       return;
@@ -443,6 +444,7 @@ export class Island {
     const grew = VIEW_LAYOUTS[view].height >= VIEW_LAYOUTS[State.view].height;
     State.view = view;
     State.lastActivity = performance.now();
+    this.fsm.setCompletion(view === "finished" ? State.settings.completionCloseInterval : null);
     this.updateWindowCollapsed();
     this.animateGeometry(!grew);
     State.notify();
@@ -1225,7 +1227,7 @@ export class Island {
     // The state machine's own deadline, so the bar follows an auto-close delay
     // edited while the countdown runs.
     const dueAt = this.fsm.homeCollapseDueAt;
-    if (State.mode !== "expanded" || State.isPinned || State.settings.keepExpanded || dueAt == null) {
+    if (State.mode !== "expanded" || State.isPinned || (State.settings.keepExpanded && this.fsm.completionDelay == null) || dueAt == null) {
       this.countdown.style.width = "0px";
       return;
     }
@@ -1306,6 +1308,7 @@ export class Island {
     this.fsm.homeToPetitDelay = State.settings.autoCloseInterval;
     this.fsm.applyVisibility(State.settings.keepExpanded, State.settings.keepMinimized, State.settings.minimizeHideInterval);
     this.animateGeometry(false);
+    if (State.mode === "expanded") this.fsm.setCompletion(State.view === "finished" ? State.settings.completionCloseInterval : null);
     this.updateWindowCollapsed();
     this.fsm.openOnHover = State.settings.openOnHover;
     State.notify();

@@ -31,6 +31,12 @@ export class IslandStateMachine {
   pinned = false;
   keepExpanded = false;
   keepMinimized = false;
+  /** null: ordinary view; zero: completion waits; positive: completion delay. */
+  completionDelay: number | null = null;
+  setCompletion(seconds: number | null) {
+    this.completionDelay = seconds == null ? null : Number.isFinite(seconds) ? Math.max(0, Math.min(86400, seconds)) : 0;
+    if (this.state === "home") this.scheduleHomeCollapse();
+  }
   private hovered = false;
 
   applyVisibility(keepExpanded: boolean, keepMinimized: boolean, hideDelay: number) {
@@ -183,8 +189,8 @@ export class IslandStateMachine {
 
   private scheduleHomeCollapse() {
     this.clear("homeCollapse");
-    if (this.pinned || this.keepExpanded || this.hovered) return;
-    const ms = (this.byHover ? this.hoverCloseDelay : this.homeDelay) * 1000;
+    if (this.pinned || this.hovered || this.completionDelay === 0 || (this.completionDelay == null && this.keepExpanded)) return;
+    const ms = (this.completionDelay ?? (this.byHover ? this.hoverCloseDelay : this.homeDelay)) * 1000;
     this.homeCollapseDueAt = performance.now() + ms;
     this.homeCollapse = window.setTimeout(() => {
       this.homeCollapse = null;
@@ -221,6 +227,7 @@ export class IslandStateMachine {
   private transition(next: FsmState) {
     if (next === this.state) return;
     const from = this.state;
+    if (next !== "home") this.completionDelay = null;
     this.state = next;
     this.onTransition?.(from, next);
   }

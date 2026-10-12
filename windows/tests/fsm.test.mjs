@@ -18,6 +18,37 @@ afterEach(() => mock.timers.reset());
 
 const seconds = (n) => mock.timers.tick(n * 1000);
 
+test("a completion waits for dismissal despite normal auto-close and hover timers", () => {
+  fsm.openOnHover = true; fsm.mouseEntered(); fsm.mouseLeft();
+  fsm.setCompletion(0);
+  seconds(86400);
+  assert.equal(fsm.state, "home");
+  fsm.applyVisibility(false, false, 60);
+  seconds(600);
+  assert.equal(fsm.state, "home");
+  fsm.forcePetit();
+  assert.equal(fsm.completionDelay, null);
+  assert.equal(fsm.state, "petit");
+});
+
+test("completion uses its own selected timer and leaves ordinary visibility unchanged", () => {
+  fsm.keepExpanded = true;
+  fsm.forceHome(); fsm.setCompletion(30); fsm.mouseLeft();
+  seconds(29); assert.equal(fsm.state, "home");
+  seconds(1); assert.equal(fsm.state, "petit");
+  assert.equal(fsm.completionDelay, null);
+  fsm.forceHome(); fsm.mouseLeft(); seconds(600);
+  assert.equal(fsm.state, "home", "the normal keep-open preference is retained");
+});
+
+test("changing a completion duration applies at once and pending approvals remain pinned", () => {
+  fsm.forceHome(); fsm.setCompletion(0); fsm.mouseLeft();
+  fsm.setCompletion(5); fsm.pinned = true;
+  seconds(5); assert.equal(fsm.state, "home");
+  fsm.pinned = false; fsm.mouseLeft();
+  seconds(5); assert.equal(fsm.state, "petit");
+});
+
 test("starts hidden and opens on the greeting at launch", () => {
   assert.equal(fsm.state, "hidden");
   fsm.launch();

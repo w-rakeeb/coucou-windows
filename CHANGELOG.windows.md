@@ -2,6 +2,11 @@
 
 ## 0.4.0 — October 11, 2026
 
+### October 12 fixes
+
+- New prompts dismiss the previous completion without reopening the expanded island.
+- Completion cards have their own duration in Window & behavior (General in Classic). The default waits until dismissal or the next prompt; timed choices leave the normal minimize/hide preferences unchanged.
+
 Merged upstream Windows/Linux 0.3.0 and 0.4.0 through `e1b2cfd` while retaining the fork's settings, placement, scaling, visibility controls, Codex sessions, allowance and local token accounting.
 
 - Optional hover opening, with keep-open, keep-minimized and pinned views respected.

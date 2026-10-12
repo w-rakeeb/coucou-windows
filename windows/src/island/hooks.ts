@@ -329,6 +329,11 @@ export function handleHook(island: Island, payload: HookPayload) {
   // Read after the card above is dropped: its pill may have handed the front
   // back to the pill you were on.
   const focused = State.focusId === agentId;
+  if (focused && State.view === "finished" && !State.pendingApproval &&
+      ["UserPromptSubmit", "PreToolUse", "PostToolUse", "PostToolUseFailure"].includes(name)) {
+    if (State.mode === "expanded") island.collapse();
+    State.view = "overview";
+  }
 
   switch (name) {
     case "SessionStart":

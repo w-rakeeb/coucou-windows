@@ -933,6 +933,14 @@ function generalSection(monitors: {id:string;label:string;width:number;height:nu
     autoClose.value = String(settings.autoCloseInterval);
     void save();
   });
+  const completionClose = h("select", { "aria-label": "Completion card duration" }) as HTMLSelectElement;
+  completionClose.append(h("option", { value: "0", text: "Until dismissed or next prompt" }));
+  const completionTimes = [5, 15, 30, 60, 120, 300];
+  if (settings.completionCloseInterval > 0 && !completionTimes.includes(settings.completionCloseInterval)) completionTimes.push(settings.completionCloseInterval);
+  for (const seconds of completionTimes.sort((a,b) => a-b)) completionClose.append(h("option", { value: String(seconds), text: `${seconds} seconds` }));
+  completionClose.value = String(settings.completionCloseInterval);
+  completionClose.addEventListener("change", () => { settings.completionCloseInterval = Number(completionClose.value); void save(); });
+  bind(completionClose, "completionCloseInterval");
 
   const screen = h("select", { "aria-label": "Monitor" }) as HTMLSelectElement;
   screen.append(
@@ -1018,6 +1026,7 @@ function generalSection(monitors: {id:string;label:string;width:number;height:nu
       h("span", { class: "hint", text: "seconds" }),
     ),
     h("div",{class:"row"},h("label",{text:"Minimized view"}),smallMode),
+    h("div",{class:"row"},h("label",{text:"Completion card"}),completionClose),
     h("div",{class:"row"},h("label",{text:"Hide delay"}),hideDelay,h("span",{class:"hint",text:"seconds"})),
     h("div", { class: "row" },
       h("label", { text: "Monitor" }),

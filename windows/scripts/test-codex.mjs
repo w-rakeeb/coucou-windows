@@ -21,7 +21,7 @@ try {
   Bridge.approvalAck = async id => calls.push(['ack', id]);
   Bridge.approvalDecline = async id => calls.push(['decline', id]);
   Bridge.approvalDecision = async (...args) => calls.push(['decision', ...args]);
-  const island = { alert: v => { State.mode = 'expanded'; State.view = v; calls.push(['alert', v]); }, setView: v => { State.view = v; }, reveal() {}, dropPin() {} };
+  const island = { alert: v => { State.mode = 'expanded'; State.view = v; calls.push(['alert', v]); }, setView: v => { State.mode = 'expanded'; State.view = v; }, collapse: () => { State.mode = 'compact'; State.isPinned = false; }, reveal() {}, dropPin() {} };
   State.loadIntegrationTasks();
   const event = (provider, sid, name, extra = {}) => handleHook(island, { provider, session_id: sid, cwd: `D:/projects/${sid}`, hook_event_name: name, ...extra });
   event('claude', 'claude-1', 'UserPromptSubmit', { prompt: 'Claude task' });
@@ -51,6 +51,7 @@ try {
   State.settings.keepExpanded = true;
   event('codex', 'codex-1', 'UserPromptSubmit', { turn_id: 'turn-2', prompt: 'New task' });
   assert.equal(State.view, 'overview');
+  assert.equal(State.mode, 'compact', 'the next prompt dismisses the previous completion');
   assert.equal(State.settings.keepExpanded, true);
   assert.deepEqual(first.activity, []);
   assert(second.activity.at(-1).detail.includes('patch two'));
@@ -65,6 +66,10 @@ try {
   assert.equal(State.view, 'finished', 'another chat must not dismiss this completion');
   event('codex', 'codex-1', 'PreToolUse', { tool_name: 'Read' });
   assert.equal(State.view, 'overview', 'tool activity resumes even without a prompt hook');
+  State.mode = 'compact'; State.view = 'finished';
+  event('codex', 'codex-1', 'UserPromptSubmit', { prompt: 'Continue quietly' });
+  assert.equal(State.mode, 'compact', 'a folded finished card must not reopen on a prompt');
+  assert.equal(State.view, 'overview');
   State.updateTask(first.id, 'thinking');
 
 

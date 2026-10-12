@@ -128,6 +128,8 @@ export interface Settings {
   compactReset: boolean;
   keepExpanded: boolean;
   keepMinimized: boolean;
+  /** Completion close delay in seconds; zero waits for dismissal or the next turn. */
+  completionCloseInterval: number;
   minimizeHideInterval: number;
   freePlacement: boolean;
   positionX: number;
@@ -217,6 +219,7 @@ export const DEFAULT_SETTINGS: Settings = {
   compactReset: false,
   keepExpanded: false,
   keepMinimized: false,
+  completionCloseInterval: 0,
   minimizeHideInterval: 60,
   freePlacement: false,
   positionX: 0.5,
