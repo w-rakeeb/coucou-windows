@@ -118,6 +118,7 @@ pub async fn eldorado_import_codex() -> Result<Status, String> {
             secret.as_bytes_mut().fill(0);
         }
         *RUNTIME.lock().await = Runtime::default();
+        *HISTORY.lock().await = None;
         Ok(eldorado_status())
     }
     #[cfg(not(windows))]
@@ -132,6 +133,7 @@ struct Runtime {
     expires: Option<Instant>,
     blocked: bool,
     next_check: Option<Instant>,
+    rate_limited_until: Option<Instant>,
     seen_orders: HashSet<String>,
     seen_notifications: HashSet<String>,
     initialized: bool,
@@ -141,6 +143,7 @@ static RUNTIME: LazyLock<tokio::sync::Mutex<Runtime>> =
 pub fn credentials_changed() {
     tauri::async_runtime::spawn(async {
         *RUNTIME.lock().await = Runtime::default();
+        *HISTORY.lock().await = None;
     });
 }
 fn text(v: &Value, key: &str, max: usize) -> String {
@@ -181,7 +184,8 @@ fn order(v: &Value) -> Option<Value> {
     Some(
         json!({"id":id,"title":text(&v["orderOfferDetails"],"offerTitle",180),"buyer":text(v,"buyerUsername",80),
         "quantity":v["purchaseQuantity"].as_f64().unwrap_or(1.0),"amount":v["totalPrice"]["amount"].as_f64(),
-        "currency":text(&v["totalPrice"],"currency",8),"state":text(&v["state"],"state",60),"createdAt":text(v,"createdDate",50)}),
+        "currency":text(&v["totalPrice"],"currency",8),"state":text(&v["state"],"state",60),"createdAt":text(v,"createdDate",50),
+        "category":text(&v["orderOfferDetails"],"gameCategoryTitle",80),"refunded":v["hasBeenRefundedPostCompletion"].as_bool().unwrap_or(false)}),
     )
 }
 fn notification(v: &Value) -> Option<Value> {
@@ -370,6 +374,109 @@ fn update(
     )
 }
 
+// On-demand history stays independent of the live alert baseline.
+static HISTORY: LazyLock<tokio::sync::Mutex<Option<(Instant, Value)>>> =
+    LazyLock::new(|| tokio::sync::Mutex::new(None));
+
+#[tauri::command]
+pub async fn eldorado_details(app: AppHandle) -> Result<Value, String> {
+    let enabled = || {
+        app.try_state::<crate::Shared>().is_some_and(|s| {
+            s.settings
+                .lock()
+                .unwrap()
+                .active_integrations
+                .iter()
+                .any(|id| id == ID)
+        }) && !crate::integrations::PAUSED.load(std::sync::atomic::Ordering::Relaxed)
+    };
+    if !enabled() || !configured() {
+        return Err("Connect Eldorado to view sales details.".into());
+    }
+    let mut cache = HISTORY.lock().await;
+    if let Some((at, data)) = &*cache {
+        if at.elapsed() < Duration::from_secs(60) {
+            return Ok(data.clone());
+        }
+    }
+    let client = http();
+    let token = {
+        let mut runtime = RUNTIME.lock().await;
+        if runtime.blocked
+            || runtime.rate_limited_until.is_some_and(|t| t > Instant::now())
+        {
+            return Err("Eldorado is unavailable. Try Refresh later.".into());
+        }
+        authenticate(&mut runtime, &client)
+            .await
+            .map_err(|e| e.message())?;
+        runtime.token.clone()
+    };
+    let mut items = Vec::new();
+    let mut seen = HashSet::new();
+    let mut cursors = HashSet::new();
+    let mut cursor = String::new();
+    let mut complete = false;
+    let mut warning = String::new();
+    // Finite pagination budget; partial history is explicitly labelled in the view.
+    for _ in 0..100 {
+        if !enabled() {
+            return Err("Eldorado monitoring is paused or disconnected.".into());
+        }
+        let mut request = client
+            .get(format!("{BASE}/api/orders/me/seller/orders"))
+            .bearer_auth(&token)
+            .query(&[("pageSize", "50")]);
+        if !cursor.is_empty() {
+            request = request.query(&[("cursorValue", cursor.as_str()), ("pageDirection", "Next")]);
+        }
+        let result = match request.send().await {
+            Ok(response) => json_response(response).await,
+            Err(_) => Err(Failure { status: 0 }),
+        };
+        let page = match result {
+            Ok(page) if page["results"].is_array() => page,
+            result => {
+                let failure = result.err().unwrap_or(Failure { status: 0 });
+                let mut runtime = RUNTIME.lock().await;
+                if matches!(failure.status, 401 | 403) {
+                    runtime.blocked = true;
+                }
+                if failure.status == 429 {
+                    runtime.next_check = Some(Instant::now() + Duration::from_secs(300));
+                    runtime.rate_limited_until = runtime.next_check;
+                }
+                warning = failure.message();
+                if items.is_empty() {
+                    return Err(warning);
+                }
+                break;
+            }
+        };
+        for item in rows(&page).iter().filter_map(order) {
+            if seen.insert(item["id"].as_str().unwrap_or("").to_string()) {
+                items.push(item);
+            }
+        }
+        cursor = text(&page, "nextPageCursor", 1024);
+        if cursor.is_empty() {
+            complete = true;
+            break;
+        }
+        if !cursors.insert(cursor.clone()) {
+            warning = "History pagination repeated results.".into();
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(150)).await;
+    }
+    if !complete && warning.is_empty() {
+        warning = "Showing the latest 5,000 orders.".into();
+    }
+    let data = json!({"orders":items,"complete":complete,"warning":warning});
+    *cache = Some((Instant::now(), data.clone()));
+    Ok(data)
+}
+
 pub async fn refresh(app: AppHandle, manual: bool) {
     let Some(shared) = app.try_state::<crate::Shared>() else {
         return;
@@ -440,6 +547,9 @@ pub async fn refresh(app: AppHandle, manual: bool) {
             }
         }
         Err(e) => {
+            if e.status == 429 {
+                runtime.rate_limited_until = Some(Instant::now() + Duration::from_secs(300));
+            }
             if matches!(e.status, 401 | 403) {
                 runtime.blocked = true;
             } else {

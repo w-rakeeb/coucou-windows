@@ -10,7 +10,7 @@ The `windows-enhancements` branch combines our Windows changes with upstream Win
 
 ## Features
 
-Eldorado sellers can connect their Seller API in **Settings → Connections** for recent orders and account-notification popups. **Use Codex API credentials** imports the Windows-protected credentials already configured for Codex into Coucou's Credential Manager entries. Monitoring is read-only; chat messages are not available through this API.
+Eldorado sellers can connect their Seller API in **Settings → Connections** for recent orders and account-notification popups. **Use Codex API credentials** imports the Windows-protected credentials already configured for Codex into Coucou's Credential Manager entries. The compact **Details** tab adds sales totals, gross amounts, average orders and top categories with All / 30 Days / 7 Days filters. Monitoring is read-only; chat messages are not available through this API.
 
 | Feature | What it does |
 |---|---|

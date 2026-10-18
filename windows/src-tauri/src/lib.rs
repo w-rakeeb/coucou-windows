@@ -909,6 +909,7 @@ pub fn run() {
             secret_clear,
             refresh_integration,
             eldorado::eldorado_status,
+            eldorado::eldorado_details,
             eldorado::eldorado_import_codex,
             github_refresh,
             open_n8n,

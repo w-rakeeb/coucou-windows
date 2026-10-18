@@ -365,6 +365,7 @@ export const Bridge = {
 
   // ── Integrations ──────────────────────────────────────────────────────────
   refreshIntegration: (id: string) => call<void>("refresh_integration", { id }),
+  eldoradoDetails: () => callOrThrow<{orders:Record<string,unknown>[];complete:boolean;warning:string}>("eldorado_details"),
   eldoradoStatus: () => call<{configured:boolean;codexAvailable:boolean}>("eldorado_status"),
   eldoradoImportCodex: () => callOrThrow<{configured:boolean;codexAvailable:boolean}>("eldorado_import_codex"),
   /** The GitHub card is on screen: refetch that part if it is stale. */

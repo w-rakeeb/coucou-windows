@@ -3,6 +3,7 @@ import { Bridge } from "../core/bridge";
 import { h, clear } from "./dom";
 import type { ViewActions, ViewHost } from "./views";
 import { t } from "../i18n/i18n";
+import { salesDetails } from "./eldorado-details";
 
 export const ELDORADO = "integration_eldorado";
 export const ELDORADO_ORDERS = "https://www.eldorado.gg/dashboard/orders/sold";
@@ -35,29 +36,46 @@ export function eldoradoCard(open: () => void): HTMLElement {
 }
 
 export function buildEldorado(actions: ViewActions): ViewHost {
-  let tab="orders",lastKey="";
+  let tab="orders",lastKey="",days=0,loading=false,detailWarning="";
+  let history: {orders:Row[];complete:boolean;warning:string}|null=null;
+  let loadedAt=0;
+  async function loadDetails(){
+    if(loading)return;
+    loading=true;detailWarning="";lastKey="";sync();
+    try { history=await Bridge.eldoradoDetails();loadedAt=Date.now(); }
+    catch { detailWarning="Could not load history. Try Refresh."; }
+    finally { loading=false;lastKey="";sync(); }
+  }
   let shownAlert=State.eldoradoAlertSequence;
   const list=h("div",{class:"eldorado-list"});
   const status=h("div",{class:"eldorado-status"});
   const ordersTab=h("button",{text:"Orders",onclick:()=>{tab="orders";lastKey="";sync();}});
   const noticesTab=h("button",{text:"Notifications",onclick:()=>{tab="notifications";lastKey="";sync();}});
+  const detailsTab=h("button",{text:t("Details"),onclick:()=>{tab="details";lastKey="";sync();if(Date.now()-loadedAt>=60000)void loadDetails();}});
   const close=h("button",{class:"link-btn",text:"Dismiss",onclick:actions.collapse});
-  const refresh=h("button",{class:"link-btn",text:t("Refresh"),onclick:()=>void Bridge.refreshIntegration(ELDORADO)});
-  const open=h("button",{class:"link-btn",text:"Open Eldorado",onclick:()=>void Bridge.openUrl(tab==="orders"?ELDORADO_ORDERS:ELDORADO_NOTIFICATIONS)});
+  const refresh=h("button",{class:"link-btn",text:t("Refresh"),onclick:()=>{void Bridge.refreshIntegration(ELDORADO);if(tab==="details")void loadDetails();}});
+  const open=h("button",{class:"link-btn",text:"Open Eldorado",onclick:()=>void Bridge.openUrl(tab==="notifications"?ELDORADO_NOTIFICATIONS:ELDORADO_ORDERS)});
   const el=h("div",{class:"view"},h("div",{class:"card eldorado-card"},
     h("div",{class:"eldorado-content"},
       h("div",{class:"eldorado-heading"},h("strong",{text:"Eldorado"}),refresh,open,close),
-      h("div",{class:"eldorado-tabs"},ordersTab,noticesTab),status,list)));
+      h("div",{class:"eldorado-tabs"},ordersTab,noticesTab,detailsTab),status,list)));
   function sync(){
     if (State.view === "eldorado" && shownAlert !== State.eldoradoAlertSequence) {
       shownAlert=State.eldoradoAlertSequence;tab=State.eldoradoAlertTab;lastKey="";
     }
     const info=State.integrations[ELDORADO];
-    const key=JSON.stringify([tab,info]);if(key===lastKey)return;lastKey=key;
+    const key=JSON.stringify([tab,info,days,history,loading,detailWarning]);if(key===lastKey)return;lastKey=key;
     ordersTab.setAttribute("aria-pressed",String(tab==="orders"));noticesTab.setAttribute("aria-pressed",String(tab==="notifications"));
+    detailsTab.setAttribute("aria-pressed",String(tab==="details"));
     const checked=info?.data.checkedAt;
     status.textContent=info?.error??(typeof checked==="number"?`Checked ${new Date(checked).toLocaleTimeString(undefined,{hour:"2-digit",minute:"2-digit",second:"2-digit"})} · Every ${State.settings.eldoradoPollInterval}s`:t("Connecting…"));
     clear(list);
+    if(tab==="details"){
+      const merged=new Map<string,Row>();
+      for(const row of [...(history?.orders??[]),...rows("orders")])if(typeof row.id==="string")merged.set(row.id,row);
+      list.append(salesDetails([...merged.values()],eldoradoMoney,days,history?.complete??false,loading,detailWarning||history?.warning||"",value=>{days=value;lastKey="";sync();}));
+      return;
+    }
     const entries=rows(tab);
     if(!entries.length)list.append(h("div",{class:"eldorado-empty",text:info?.loaded?`No recent ${tab}`:"Waiting for the first check"}));
     for(const row of entries){
