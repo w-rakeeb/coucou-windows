@@ -91,6 +91,8 @@ In **Settings → Connections**, enable Eldorado and choose **Use Codex API cred
 
 The Eldorado pill shows recent orders. **View** opens Orders, Notifications and Details; new items can open the relevant tab automatically. Configure popups, sound, popup duration and the check interval (15 seconds by default). The first snapshot is silent. Existing connections are preserved, and alerts wait while an agent approval or a composed chat needs attention.
 
+Select the Eldorado pill on the main island, then use its bottom-right **Details** button to open the sales summary directly. **Back** returns to the main card.
+
 **Details** loads all available order pages on demand (up to 5,000 orders), with a 60-second cache and live updates for recent orders. All / 30 Days / 7 Days filters use the order creation date. Sales include Received and Completed orders, excluding refunds and cancellations; amounts are gross before fees, grouped by currency. Incomplete history is explicitly labelled. Category rankings count sales, not revenue.
 
 This integration reads orders and account notifications only. It does not deliver or cancel orders, mark notifications as read, or read chat conversations. Eldorado does not expose chat messages through the Seller API.

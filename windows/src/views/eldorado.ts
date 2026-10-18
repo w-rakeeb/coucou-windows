@@ -31,7 +31,7 @@ export function eldoradoCard(open: () => void): HTMLElement {
   if(info?.error)body.append(h("div",{class:"int-status",text:info.error}));
   else if(!info?.loaded)body.append(h("div",{class:"int-status",text:info?.configured?"Checking orders…":"Connect in Settings → Connections"}));
   else if(!orders.length)body.append(h("div",{class:"int-status",text:"No recent orders"}));
-  else for(const row of orders.slice(0,3))body.append(h("div",{class:"eldorado-summary-row"},h("span",{text:String(row.title??"Order"),title:String(row.title??"")}),h("span",{text:eldoradoMoney(row)})));
+  else for(const row of orders.slice(0,2))body.append(h("div",{class:"eldorado-summary-row"},h("span",{text:String(row.title??"Order"),title:String(row.title??"")}),h("span",{text:eldoradoMoney(row)})));
   return body;
 }
 
@@ -52,7 +52,7 @@ export function buildEldorado(actions: ViewActions): ViewHost {
   const ordersTab=h("button",{text:"Orders",onclick:()=>{tab="orders";lastKey="";sync();}});
   const noticesTab=h("button",{text:"Notifications",onclick:()=>{tab="notifications";lastKey="";sync();}});
   const detailsTab=h("button",{text:t("Details"),onclick:()=>{tab="details";lastKey="";sync();if(Date.now()-loadedAt>=60000)void loadDetails();}});
-  const close=h("button",{class:"link-btn",text:"Dismiss",onclick:actions.collapse});
+  const close=h("button",{class:"link-btn",text:"Dismiss",onclick:()=>tab==="details"?actions.setView("overview"):actions.collapse()});
   const refresh=h("button",{class:"link-btn",text:t("Refresh"),onclick:()=>{void Bridge.refreshIntegration(ELDORADO);if(tab==="details")void loadDetails();}});
   const open=h("button",{class:"link-btn",text:"Open Eldorado",onclick:()=>void Bridge.openUrl(tab==="notifications"?ELDORADO_NOTIFICATIONS:ELDORADO_ORDERS)});
   const el=h("div",{class:"view"},h("div",{class:"card eldorado-card"},
@@ -60,6 +60,12 @@ export function buildEldorado(actions: ViewActions): ViewHost {
       h("div",{class:"eldorado-heading"},h("strong",{text:"Eldorado"}),refresh,open,close),
       h("div",{class:"eldorado-tabs"},ordersTab,noticesTab,detailsTab),status,list)));
   function sync(){
+    if (State.view === "eldorado" && State.eldoradoDetailsRequested) {
+      State.eldoradoDetailsRequested=false;
+      shownAlert=State.eldoradoAlertSequence;
+      tab="details";lastKey="";
+      if(Date.now()-loadedAt>=60000)void loadDetails();
+    }
     if (State.view === "eldorado" && shownAlert !== State.eldoradoAlertSequence) {
       shownAlert=State.eldoradoAlertSequence;tab=State.eldoradoAlertTab;lastKey="";
     }
@@ -67,6 +73,7 @@ export function buildEldorado(actions: ViewActions): ViewHost {
     const key=JSON.stringify([tab,info,days,history,loading,detailWarning]);if(key===lastKey)return;lastKey=key;
     ordersTab.setAttribute("aria-pressed",String(tab==="orders"));noticesTab.setAttribute("aria-pressed",String(tab==="notifications"));
     detailsTab.setAttribute("aria-pressed",String(tab==="details"));
+    close.textContent=tab==="details"?t("Back"):"Dismiss";
     const checked=info?.data.checkedAt;
     status.textContent=info?.error??(typeof checked==="number"?`Checked ${new Date(checked).toLocaleTimeString(undefined,{hour:"2-digit",minute:"2-digit",second:"2-digit"})} · Every ${State.settings.eldoradoPollInterval}s`:t("Connecting…"));
     clear(list);

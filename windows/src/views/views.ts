@@ -190,7 +190,7 @@ export function buildHeader(actions: ViewActions): ViewHost {
 
 // ── Overview ──────────────────────────────────────────────────────────────────
 
-function buildOverview(actions: ViewActions): ViewHost {
+export function buildOverview(actions: ViewActions): ViewHost {
   /** The diff open in the left card (a FileDiff id), as activeDiffId on macOS. */
   let activeDiffId: number | null = null;
   const closeDiff = () => {
@@ -211,7 +211,12 @@ function buildOverview(actions: ViewActions): ViewHost {
     { class: "icon-btn jump", title: tl("Open"), onclick: () => actions.openTarget() },
     svg(ICONS.arrowUpRight, 8),
   );
-  const details = h("button", { class: "activity-open", text: t("Details"), title: "View session activity details", onclick: () => actions.setView("activity") });
+  const details = h("button", { class: "activity-open", text: t("Details"), title: "View session activity details", onclick: () => {
+    if (State.focusTask?.id === "integration_eldorado") {
+      State.eldoradoDetailsRequested = true;
+      actions.setView("eldorado");
+    } else actions.setView("activity");
+  } });
   const left = card(null, leftBody, jump, details);
   const pills = h("div", { class: "pills" });
   const right = card(null, pills);
@@ -326,7 +331,9 @@ function buildOverview(actions: ViewActions): ViewHost {
       // A workspace or agent pill with a live session keeps the ticker; every
       // other pill shows its own card, exactly like IntegrationCardView.
       const sessionActive = task != null && hasSessionTicker(task);
-      details.hidden = !sessionActive;
+      const eldoradoActive = task?.id === "integration_eldorado";
+      details.hidden = !sessionActive && !eldoradoActive;
+      details.title = eldoradoActive ? "View Eldorado sales details" : "View session activity details";
 
       const planOpen = planCardOpen();
       if (mode === "plan" && !planOpen) {

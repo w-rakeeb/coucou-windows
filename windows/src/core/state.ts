@@ -330,6 +330,7 @@ class AppState {
   cardSelection: number | null = null;
   eldoradoAlertTab: "orders" | "notifications" = "orders";
   eldoradoAlertSequence = 0;
+  eldoradoDetailsRequested = false;
   /** Rows in the list on screen, 0 when there is none (AppState.cardItemCount). */
   cardItemCount = 0;
   /**
