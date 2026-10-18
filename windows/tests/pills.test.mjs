@@ -42,7 +42,7 @@ test("the catalog holds the Mac's pills, in the Mac's order, with the Mac's valu
     ["integration_spotify", "Spotify", "#1DB954", "service", "Integration"],
   ];
   assert.deepEqual(
-    PILL_CATALOG.map((p) => [p.id, p.name, p.color, p.category, p.subtitle]),
+    PILL_CATALOG.filter(p => p.id !== "integration_eldorado").map((p) => [p.id, p.name, p.color, p.category, p.subtitle]),
     mac,
   );
   assert.deepEqual(PILL_CATEGORIES.map((c) => c.title), [
@@ -93,7 +93,7 @@ test("this build leaves out what only macOS has, Claude Desktop on Linux and Spo
   assert.ok(!windows.includes("integration_spotify"));
   assert.deepEqual(
     linux.filter((id) => id !== "integration_spotify"),
-    windows.filter((id) => id !== "agent_claude-desktop"),
+    windows.filter((id) => id !== "agent_claude-desktop" && id !== "integration_eldorado"),
   );
 });
 
@@ -173,14 +173,15 @@ test("a declaration from an older or edited settings file is made usable", () =>
     "integration_claude");
 });
 
-test("up to four pills next to the main one, never the main one itself", () => {
+test("up to the configured pill capacity next to the main one, never the main one itself", () => {
   const d = {
     mainPill: "integration_claude",
     activeIntegrations: ["integration_n8n", "integration_github", "integration_stripe"],
   };
   const four = toggleDeclared(d, "agent_gemini", "linux");
-  assert.equal(four.length, MAX_DECLARED);
-  assert.equal(toggleDeclared({ ...d, activeIntegrations: four }, "ai_anthropic", "linux"), null);
+  assert.equal(four.length, 4);
+  const full = availablePills("linux").map(p=>p.id).filter(id=>id!==d.mainPill&&id!=="ai_anthropic").slice(0,MAX_DECLARED);
+  assert.equal(toggleDeclared({ ...d, activeIntegrations: full }, "ai_anthropic", "linux"), null);
   assert.equal(toggleDeclared(d, "integration_claude", "linux"), null);
   assert.equal(toggleDeclared(d, "integration_music", "linux"), null);
   assert.equal(toggleDeclared(d, "agent_claude-desktop", "linux"), null);
@@ -288,14 +289,14 @@ test("a Claude Code session gets its pill even when it is not loaded", () => {
   assert.equal(State.upsertWorkspacePill("not_a_pill", "x", ""), null);
 });
 
-test("toggling declares up to four pills and never the main one", () => {
+test("toggling preserves existing connections while adding another pill", () => {
   State.settings.activeIntegrations = [];
   State.loadIntegrationTasks();
   for (const id of ["integration_n8n", "agent_gemini", "ai_anthropic", "integration_stripe", "integration_github"]) {
     State.toggleIntegration(id);
   }
   assert.deepEqual(State.settings.activeIntegrations, [
-    "integration_n8n", "agent_gemini", "ai_anthropic", "integration_stripe",
+    "integration_n8n", "agent_gemini", "ai_anthropic", "integration_stripe", "integration_github",
   ]);
   State.toggleIntegration("integration_claude");
   assert.ok(ids().includes("integration_claude"));

@@ -71,6 +71,8 @@ const ACCENT = {
 };
 
 export const PILL_CATALOG: readonly PillDefinition[] = [
+  { id: "integration_eldorado", name: "Eldorado", color: "#F6C344", category: "service",
+    subtitle: N_("Integration"), source: "n8n", support: "windows", connect: key("eldorado-client-secret") },
   // ── Where you code ─────────────────────────────────────────────────────────
   { id: "integration_claude", name: "VS Code", color: "#F5F6F8", category: "workspace",
     subtitle: N_("Integration"), source: "claudeCode", support: "yes", connect: hooks },
@@ -140,7 +142,7 @@ export const PILL_CATALOG: readonly PillDefinition[] = [
 export const DEFAULT_MAIN_PILL = "integration_claude";
 
 /** How many declared pills may sit next to the main one. */
-export const MAX_DECLARED = 4;
+export const MAX_DECLARED = 8;
 
 /** The OS this page runs on. Only the Windows webview says "Windows". */
 export const HOST_OS: HostOs =

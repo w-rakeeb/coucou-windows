@@ -64,6 +64,7 @@ pub fn set_paused(on: bool) {
 
 /// Spawns every poller with the macOS delays and intervals.
 pub fn start(app: AppHandle) {
+    crate::eldorado::start(app.clone());
     spawn(app.clone(), "integration_n8n", 3, 15, poll_n8n);
     spawn(app.clone(), "integration_vercel", 5, 30, poll_vercel);
     spawn(app.clone(), "integration_stripe", 6, 30, poll_stripe);
@@ -109,6 +110,7 @@ where
 /// One-shot refresh from the Refresh buttons in the island.
 pub async fn poll_once(app: AppHandle, id: &str) {
     match id {
+        "integration_eldorado" => crate::eldorado::refresh(app, true).await,
         "integration_stripe" => poll_stripe(app).await,
         "integration_github" => {
             wake_github_pulse();

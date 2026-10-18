@@ -762,6 +762,10 @@ interface IntegrationDef {
 }
 
 const INTEGRATIONS: IntegrationDef[] = [
+  { id: "integration_eldorado", name: "Eldorado", color: "#F6C344", fields: [
+    { key:"eldorado-client-id",label:"Client ID",placeholder:"…",secret:true },
+    { key:"eldorado-client-secret",label:"Client secret",placeholder:"…",secret:true },
+  ] },
   { id: "integration_stripe", name: "Stripe", color: "#0570DE",
     fields: [{ key: "stripe-api-key", label: N_("Secret key"), placeholder: "sk_live_…", secret: true }] },
   { id: "integration_github", name: "GitHub", color: "#F4505E",
@@ -851,6 +855,33 @@ function integrationsSection(present: Record<string, boolean>): HTMLElement {
       );
     }
 
+    if (def.id === "integration_eldorado") {
+      const result=h("span",{class:"hint"});
+      const importButton=h("button",{text:"Use Codex API credentials",onclick:async()=>{
+        try {
+          const imported=await Bridge.eldoradoImportCodex();
+          if(!imported.configured)throw new Error("Credentials were not found.");
+          if(!settings.activeIntegrations.includes(def.id))settings.activeIntegrations.push(def.id);
+          await save(); await rerender();
+        } catch(error){result.textContent=String(error).replace(/^Error: /,"");}
+      }});
+      void Bridge.eldoradoStatus().then(s=>{importButton.toggleAttribute("disabled",!s?.codexAvailable);});
+      const interval=h("select",{"aria-label":"Eldorado check interval"}) as HTMLSelectElement;
+      for(const seconds of [15,30,60,120])interval.append(h("option",{value:String(seconds),text:`${seconds} seconds`}));
+      interval.value=String(settings.eldoradoPollInterval);
+      interval.addEventListener("change",()=>{settings.eldoradoPollInterval=Number(interval.value);void save();});
+      const duration=h("select",{"aria-label":"Eldorado popup duration"}) as HTMLSelectElement;
+      duration.append(h("option",{value:"0",text:"Until dismissed"}));
+      for(const seconds of [5,15,30,60])duration.append(h("option",{value:String(seconds),text:`${seconds} seconds`}));
+      duration.value=String(settings.eldoradoPopupDuration);
+      duration.addEventListener("change",()=>{settings.eldoradoPopupDuration=Number(duration.value);void save();});
+      rows.append(h("div",{class:"row"},importButton),result,
+        h("div",{class:"row"},h("label",{text:"Popups"}),toggle(settings.eldoradoPopups,v=>{settings.eldoradoPopups=v;void save();})),
+        h("div",{class:"row"},h("label",{text:"Notification sound"}),toggle(settings.eldoradoSound,v=>{settings.eldoradoSound=v;void save();})),
+        h("div",{class:"row"},h("label",{text:"Check interval"}),interval),
+        h("div",{class:"row"},h("label",{text:"Popup duration"}),duration),
+        h("div",{class:"hint",text:"Orders and account notifications. Chat messages are not available through the Seller API."}));
+    }
     if (def.hint) rows.append(h("div", { class: "hint", text: t(def.hint) }));
     if (def.id === "integration_spotify") {
       // As on the Mac's row: said only when there is no Spotify to launch.

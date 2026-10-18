@@ -130,6 +130,10 @@ export interface Settings {
   keepMinimized: boolean;
   /** Completion close delay in seconds; zero waits for dismissal or the next turn. */
   completionCloseInterval: number;
+  eldoradoPopups: boolean;
+  eldoradoSound: boolean;
+  eldoradoPollInterval: number;
+  eldoradoPopupDuration: number;
   minimizeHideInterval: number;
   freePlacement: boolean;
   positionX: number;
@@ -220,6 +224,10 @@ export const DEFAULT_SETTINGS: Settings = {
   keepExpanded: false,
   keepMinimized: false,
   completionCloseInterval: 0,
+  eldoradoPopups: true,
+  eldoradoSound: true,
+  eldoradoPollInterval: 15,
+  eldoradoPopupDuration: 15,
   minimizeHideInterval: 60,
   freePlacement: false,
   positionX: 0.5,
@@ -320,6 +328,8 @@ class AppState {
   private nextDiffId = 0;
   /** Ctrl+↑ / Ctrl+↓: the highlighted row of the card's list (AppState.cardSelection). */
   cardSelection: number | null = null;
+  eldoradoAlertTab: "orders" | "notifications" = "orders";
+  eldoradoAlertSequence = 0;
   /** Rows in the list on screen, 0 when there is none (AppState.cardItemCount). */
   cardItemCount = 0;
   /**

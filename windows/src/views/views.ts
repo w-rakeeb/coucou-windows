@@ -5,6 +5,7 @@
 import { h, svg, clear, dot } from "./dom";
 import { ICONS } from "./icons";
 import { Ticker } from "./ticker";
+import { buildEldorado } from "./eldorado";
 import { renderActivity } from "./activity-code";
 import { renderSession, tokenNumber, exactTokens } from "./session";
 import { State, isCodingAgent, providerName, type AgentTask } from "../core/state";
@@ -253,6 +254,7 @@ function buildOverview(actions: ViewActions): ViewHost {
   );
 
   const hooks: IntegrationCardHooks = {
+    openEldorado: () => actions.setView("eldorado"),
     get detailOpen() {
       return detailOpen;
     },
@@ -930,6 +932,7 @@ export function buildViews(
   map.set("overview", buildOverview(actions));
   map.set("activity", buildActivity(actions));
   map.set("usage", buildUsage(actions));
+  map.set("eldorado", buildEldorado(actions));
   map.set("empty", buildEmpty(actions));
   map.set("approval", buildApproval(actions));
   map.set("question", buildQuestion(actions));

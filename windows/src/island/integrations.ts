@@ -12,12 +12,31 @@ import type { Island } from "./island";
 const GITHUB = "integration_github";
 
 const clearTimers = new Map<string, number>();
+let pendingEldorado = false;
+let eldoradoFlushTimer: number | null = null;
+
+export function scheduleEldoradoAlert(island: Island) {
+  if (!pendingEldorado || State.pendingApproval || (State.mode === "expanded" && State.view === "prompt") || eldoradoFlushTimer != null) return;
+  // Approval cleanup may navigate after State.endApproval notifies. Let that
+  // whole operation finish before opening the queued service notification.
+  eldoradoFlushTimer = window.setTimeout(() => { eldoradoFlushTimer=null; flushEldoradoAlert(island); },0);
+}
+
+export function flushEldoradoAlert(island: Island) {
+  if (!pendingEldorado) return;
+  if (State.paused || !State.settings.eldoradoPopups || !State.settings.activeIntegrations.includes("integration_eldorado")) { pendingEldorado=false; return; }
+  if (State.pendingApproval || (State.mode === "expanded" && State.view === "prompt")) return;
+  pendingEldorado=false;
+  State.setFocus("integration_eldorado");
+  island.alert("eldorado");
+}
 
 export function registerIntegrationHandlers(island: Island) {
-  void onEvent<IntegrationUpdate>("integration", (update) => handle(island, update));
+  void onEvent<IntegrationUpdate>("integration", (update) => handleIntegrationUpdate(island, update));
   void onEvent<GitHubEvent[]>("github-alerts", handleGitHubAlerts);
   void refreshConfigured();
   State.subscribe(refreshGitHubWhenShown);
+  State.subscribe(() => scheduleEldoradoAlert(island));
 }
 
 /**
@@ -90,8 +109,9 @@ export async function refreshHookPills() {
   State.notify();
 }
 
-function handle(island: Island, update: IntegrationUpdate) {
+export function handleIntegrationUpdate(island: Island, update: IntegrationUpdate) {
   if (State.paused) return;
+  if (update.id === "integration_eldorado" && !State.settings.activeIntegrations.includes(update.id)) return;
 
   const previous = State.integrations[update.id];
   State.integrations[update.id] = {
@@ -111,10 +131,16 @@ function handle(island: Island, update: IntegrationUpdate) {
       if (State.focusId !== update.id) {
         task.pillBadge = event.success ? "finished" : "error";
       }
-      Sound.play(event.success ? "finish" : "error");
+      if (update.id !== "integration_eldorado" || State.settings.eldoradoSound) Sound.play(event.success ? "finish" : "error");
       // Same as the Swift pollers: show the compact island so the badge is seen,
       // but never steal the screen for a successful deploy.
       island.reveal();
+      if (update.id === "integration_eldorado" && State.settings.eldoradoPopups) {
+        State.eldoradoAlertTab = Number(update.data.newOrders) > 0 ? "orders" : "notifications";
+        State.eldoradoAlertSequence++;
+        pendingEldorado = true;
+        flushEldoradoAlert(island);
+      }
 
       const existing = clearTimers.get(update.id);
       if (existing != null) window.clearTimeout(existing);

@@ -20,6 +20,8 @@ pub const KNOWN_KEYS: &[&str] = &[
     "resend-api-key",
     "notion-api-key",
     "calcom-api-key",
+    "eldorado-client-id",
+    "eldorado-client-secret",
 ];
 
 fn entry(key: &str) -> Option<Entry> {

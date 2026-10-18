@@ -48,6 +48,10 @@ pub struct Settings {
     /// Zero keeps a finished card open until dismissed or the same session resumes.
     #[serde(default)]
     pub completion_close_interval: f64,
+    pub eldorado_popups: bool,
+    pub eldorado_sound: bool,
+    pub eldorado_poll_interval: f64,
+    pub eldorado_popup_duration: f64,
     #[serde(default = "default_hide_delay")]
     pub minimize_hide_interval: f64,
     #[serde(default)]
@@ -195,6 +199,10 @@ impl Default for Settings {
             keep_expanded: false,
             keep_minimized: false,
             completion_close_interval: 0.0,
+            eldorado_popups: true,
+            eldorado_sound: true,
+            eldorado_poll_interval: 15.0,
+            eldorado_popup_duration: 15.0,
             minimize_hide_interval: 60.0,
             free_placement: false,
             position_x: 0.5,
@@ -1016,7 +1024,8 @@ mod tests {
                 "settingsInterface", "openaiModel", "openrouterModel", "alwaysOnTop",
                 "positionLocked", "edgeSnap", "petColor", "compactScale", "expandedScale",
                 "rememberPlacement", "expandedReset", "compactLimits", "compactActivity",
-                "compactReset", "keepExpanded", "keepMinimized", "completionCloseInterval", "minimizeHideInterval",
+                "compactReset", "keepExpanded", "keepMinimized", "completionCloseInterval",
+                "eldoradoPopups", "eldoradoSound", "eldoradoPollInterval", "eldoradoPopupDuration", "minimizeHideInterval",
                 "freePlacement", "positionX", "positionY",
                 "soundEnabled",
                 "soundVolume",

@@ -17,6 +17,7 @@ mod hooks;
 mod i18n;
 mod identity;
 mod integrations;
+mod eldorado;
 mod island;
 mod local_chat;
 mod log;
@@ -599,6 +600,7 @@ fn secret_set(app: AppHandle, key: String, value: String) -> Result<(), String> 
     }
     let before = (key == "github-token").then(|| secrets::get(&key));
     secrets::set(&key, &value)?;
+    if key.starts_with("eldorado-") { eldorado::credentials_changed(); }
     if let Some(before) = before {
         if secrets::get(&key) != before {
             integrations::github_token_changed(&app);
@@ -906,6 +908,8 @@ pub fn run() {
             secret_set,
             secret_clear,
             refresh_integration,
+            eldorado::eldorado_status,
+            eldorado::eldorado_import_codex,
             github_refresh,
             open_n8n,
             open_settings_window,

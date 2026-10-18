@@ -8,6 +8,7 @@ export type IslandViewName =
   | "overview"
   | "activity"
   | "usage"
+  | "eldorado"
   | "empty"
   | "approval"
   | "question"
@@ -74,6 +75,7 @@ export const VIEW_LAYOUTS: Record<IslandViewName, ViewLayout> = {
   overview: { height: 160, botX: 68, botY: null, botDiameter: 58, agentMode: "pills" },
   activity: { height: 300, botX: 62, botY: 82, botDiameter: 56, agentMode: "column" },
   usage: { height: 270, botX: 62, botY: 110, botDiameter: 56, agentMode: "none" },
+  eldorado: { height: 300, botX: 62, botY: 90, botDiameter: 56, agentMode: "none" },
   empty: { height: 160, botX: 70, botY: null, botDiameter: 62, agentMode: "none" },
   approval: { height: 160, botX: 62, botY: null, botDiameter: 56, agentMode: "column" },
   question: { height: 160, botX: 62, botY: null, botDiameter: 56, agentMode: "column" },

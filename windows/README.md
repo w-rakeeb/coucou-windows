@@ -85,7 +85,15 @@ Everything else happens on its own: a Claude Code permission request opens the
 island with **Deny / Allow**, a finished session shows what it did, and
 your integrations sit in the coloured pills next to Mochi.
 
-## Claude Code
+## Eldorado Seller API
+
+In **Settings → Connections**, enable Eldorado and choose **Use Codex API credentials** to import the credentials already protected by your Windows account. Alternatively, save a Client ID and Client secret in that connection. Coucou stores them in Windows Credential Manager and keeps access tokens in memory.
+
+The Eldorado pill shows recent orders. **View** opens Orders and Notifications; new items can open the relevant tab automatically. Configure popups, sound, popup duration and the check interval (15 seconds by default). The first snapshot is silent. Existing connections are preserved, and alerts wait while an agent approval or a composed chat needs attention.
+
+This integration reads orders and account notifications only. It does not deliver or cancel orders, mark notifications as read, or read chat conversations. Eldorado does not expose chat messages through the Seller API.
+
+## Claude Code hooks
 
 <img src="screenshots/settings.png" width="562" alt="The settings window">
 

@@ -189,6 +189,7 @@ export class Island {
         const task = State.focusTask;
         if (!task) return;
         const urls: Record<string, string> = {
+          integration_eldorado: "https://www.eldorado.gg/dashboard/orders/sold",
           integration_resend: "https://resend.com/emails",
           integration_vercel: "https://vercel.com/dashboard",
           integration_github: "https://github.com/pulls",
@@ -426,7 +427,7 @@ export class Island {
     if (State.mode !== "expanded") this.setMode("expanded");
     else this.animateGeometry(false);
     State.lastActivity = performance.now();
-    this.fsm.setCompletion(view === "finished" ? State.settings.completionCloseInterval : null);
+    this.fsm.setCompletion(this.viewCloseDelay(view));
     State.notify();
   }
 
@@ -436,7 +437,7 @@ export class Island {
     if (State.mode !== "expanded") {
       this.fsm.forceHome();
       State.view = view;
-      this.fsm.setCompletion(view === "finished" ? State.settings.completionCloseInterval : null);
+      this.fsm.setCompletion(this.viewCloseDelay(view));
       this.animateGeometry(false);
       State.notify();
       return;
@@ -444,7 +445,7 @@ export class Island {
     const grew = VIEW_LAYOUTS[view].height >= VIEW_LAYOUTS[State.view].height;
     State.view = view;
     State.lastActivity = performance.now();
-    this.fsm.setCompletion(view === "finished" ? State.settings.completionCloseInterval : null);
+    this.fsm.setCompletion(this.viewCloseDelay(view));
     this.updateWindowCollapsed();
     this.animateGeometry(!grew);
     State.notify();
@@ -462,6 +463,10 @@ export class Island {
     // back left it thinking the island was still open, and a click on the compact
     // island then did nothing — the island could never be reopened.
     this.fsm.forcePetit();
+  }
+
+  private viewCloseDelay(view: IslandViewName): number | null {
+    return view === "finished" ? State.settings.completionCloseInterval : view === "eldorado" ? State.settings.eldoradoPopupDuration : null;
   }
 
   /** Alert from the hook server: open on this view. Pinned alerts never auto-close. */
@@ -1308,7 +1313,7 @@ export class Island {
     this.fsm.homeToPetitDelay = State.settings.autoCloseInterval;
     this.fsm.applyVisibility(State.settings.keepExpanded, State.settings.keepMinimized, State.settings.minimizeHideInterval);
     this.animateGeometry(false);
-    if (State.mode === "expanded") this.fsm.setCompletion(State.view === "finished" ? State.settings.completionCloseInterval : null);
+    if (State.mode === "expanded") this.fsm.setCompletion(this.viewCloseDelay(State.view));
     this.updateWindowCollapsed();
     this.fsm.openOnHover = State.settings.openOnHover;
     State.notify();

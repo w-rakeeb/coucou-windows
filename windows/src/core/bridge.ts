@@ -365,6 +365,8 @@ export const Bridge = {
 
   // ── Integrations ──────────────────────────────────────────────────────────
   refreshIntegration: (id: string) => call<void>("refresh_integration", { id }),
+  eldoradoStatus: () => call<{configured:boolean;codexAvailable:boolean}>("eldorado_status"),
+  eldoradoImportCodex: () => callOrThrow<{configured:boolean;codexAvailable:boolean}>("eldorado_import_codex"),
   /** The GitHub card is on screen: refetch that part if it is stale. */
   githubRefresh: (section: "pulse" | "activity") => call<void>("github_refresh", { section }),
   /** Opens the configured n8n instance in the browser. */

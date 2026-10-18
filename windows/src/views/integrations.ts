@@ -13,6 +13,7 @@ import { refreshHookPills } from "../island/integrations";
 import { readActivity, readPulse, readStats } from "../core/github";
 import { githubDetail, githubPulseCard } from "./github";
 import { N_, language, t } from "../i18n/i18n";
+import { eldoradoCard } from "./eldorado";
 
 /** Same shape as the Swift `timeAgo` computed properties. */
 export function timeAgo(value: unknown): string {
@@ -420,6 +421,7 @@ function n8nDetail(task: AgentTask, onBack: () => void): HTMLElement {
 // ── Dispatch ──────────────────────────────────────────────────────────────────
 
 export interface IntegrationCardHooks {
+  openEldorado?(): void;
   detailOpen: boolean;
   openDetail(): void;
   closeDetail(): void;
@@ -449,6 +451,7 @@ export function hasIntegrationData(id: string): boolean {
 }
 
 export function renderIntegrationCard(task: AgentTask, hooks: IntegrationCardHooks): HTMLElement {
+  if (task.id === "integration_eldorado") return eldoradoCard(hooks.openEldorado ?? hooks.openSettings);
   if (task.id === "integration_n8n") {
     const hasActivity = task.steps.length > 0 && (task.state === "finished" || task.state === "error");
     return hooks.detailOpen && hasActivity

@@ -1,5 +1,13 @@
 # Windows fork changes
 
+## October 18, 2026 — Eldorado connection
+
+- Read-only seller orders and account notifications, using securely imported Codex credentials or separately saved Seller API credentials.
+- A recent-orders card and separate Orders/Notifications view; new items open the relevant tab. Existing items load silently, and duplicate order notices do not alert twice.
+- Optional popups and sound, adjustable 15–120-second polling, and timed or persistent popups. Alerts wait for approval cards and composed chats.
+- Connection capacity increased to eight so Eldorado can be added without removing existing services.
+- Incoming chat messages are not exposed by Eldorado's Seller API and are not monitored.
+
 ## 0.4.0 — October 11, 2026
 
 ### October 12 fixes
